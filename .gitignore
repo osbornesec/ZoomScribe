@@ -1,0 +1,55 @@
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# IDE and Editor Files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+
+# Build Artifacts
+build/
+dist/
+*.o
+*.pyc
+__pycache__/
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Dependency Directories
+node_modules/
+vendor/
+venv/
+.env/
+
+# Log Files
+*.log
+
+# Temporary Files
+*.tmp
+*~
+
+# Configuration Files (sensitive or local)
+.env
+.env.*
+config.local.js
+
+# Python-specific
+*.py[co]
+*.egg-info/
+.pytest_cache/
+
+# Node.js-specific
+npm-debug.log
+yarn-debug.log
+
+# Gemini-specific
+.gemini/

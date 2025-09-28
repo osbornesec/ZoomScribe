@@ -47,7 +47,13 @@
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- [ ] **Spec & Plan**: The feature spec lists user-visible behavior, acceptance criteria, and edge cases. The plan enumerates risks and applies the Security Standard.
+- [ ] **Tests**: Unit, integration, regression, and negative tests are planned for all new logic and I/O boundaries.
+- [ ] **Static Analysis & Types**: The plan accounts for passing lint, formatting, and strict type-checking.
+- [ ] **Security**: The plan addresses secret management, vulnerability scanning, data auditing, and input validation.
+- [ ] **Git & Review**: The plan uses standard branching and commit conventions.
+- [ ] **Observability**: The plan includes tasks for structured logging, metrics, and tracing.
+- [ ] **Documentation**: The plan includes tasks for updating READMEs, docstrings, or other documentation.
 
 ## Project Structure
 
@@ -216,4 +222,4 @@ directories captured above]
 - [ ] Complexity deviations documented
 
 ---
-*Based on Constitution v2.1.1 - See `/memory/constitution.md`*
+*Based on Constitution v1.0.0 - See `/.specify/memory/constitution.md`*
