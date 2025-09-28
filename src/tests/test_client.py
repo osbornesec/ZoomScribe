@@ -190,3 +190,30 @@ def test_list_recordings_meeting_id_honors_host_filter(client_factory):
     )
 
     assert recordings == []
+
+
+def test_list_recordings_meeting_id_with_single_slash_is_not_double_encoded(
+    client_factory,
+):
+    """
+    Assert that a UUID with slashes, but not at the start, is not double-encoded.
+
+    The Zoom API specifies only UUIDs starting with / or containing // need
+    double-encoding.
+    """
+    uuid_with_slash = "a/b/c"
+    responses = [
+        StubResponse({"meetings": [{"uuid": uuid_with_slash}]}),
+        StubResponse(make_meeting(uuid_with_slash)),
+    ]
+    client, session = client_factory(responses)
+
+    client.list_recordings(
+        start=datetime(2025, 9, 1, tzinfo=UTC),
+        end=datetime(2025, 9, 30, tzinfo=UTC),
+        meeting_id="some_meeting_id",
+    )
+
+    assert len(session.calls) == 2
+    encoded_path = session.calls[1][1]
+    assert "meetings/a%2Fb%2Fc/recordings" in encoded_path
