@@ -58,8 +58,20 @@ def load_env_credentials(dotenv_path: str | None = None) -> dict[str, str]:
 
 
 def _double_urlencode(value: str) -> str:
-    once = quote(value, safe="")
-    return quote(once, safe="")
+    """Double URL-encode a string."""
+    return quote(quote(value, safe=""), safe="")
+
+
+def _encode_uuid(uuid: str) -> str:
+    """
+    URL-encode a meeting UUID.
+
+    The Zoom API requires double encoding for UUIDs that start
+    with a / or contain //.
+    """
+    if uuid.startswith("/") or "//" in uuid:
+        return _double_urlencode(uuid)
+    return quote(uuid, safe="")
 
 
 class ZoomAPIClient:
@@ -215,7 +227,7 @@ class ZoomAPIClient:
         return recordings
 
     def _fetch_meeting_recording(self, uuid: str) -> dict:
-        path = f"meetings/{_double_urlencode(uuid)}/recordings"
+        path = f"meetings/{_encode_uuid(uuid)}/recordings"
         response = self._request(
             "GET",
             path,
