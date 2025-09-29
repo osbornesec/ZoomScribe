@@ -1,0 +1,18 @@
+id: python-no-subprocess-shell
+snapshots:
+  ? |
+    from subprocess import run
+    run("echo hello", shell=True)
+  : labels:
+    - source: run("echo hello", shell=True)
+      style: primary
+      start: 27
+      end: 56
+  ? |
+    import subprocess
+    subprocess.run("echo hello", shell=True)
+  : labels:
+    - source: subprocess.run("echo hello", shell=True)
+      style: primary
+      start: 18
+      end: 58

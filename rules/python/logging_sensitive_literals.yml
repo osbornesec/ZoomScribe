@@ -1,0 +1,13 @@
+id: python-logging-sensitive-literals
+language: python
+message: "Remove or mask sensitive keywords before logging."
+severity: warning
+rule:
+  any:
+    - pattern: $LOGGER.$METHOD($MSG)
+    - pattern: $LOGGER.$METHOD($MSG, $$$REST)
+constraints:
+  METHOD:
+    matches: python-logger-method
+  MSG:
+    matches: python-sensitive-string

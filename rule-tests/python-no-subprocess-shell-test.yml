@@ -1,0 +1,15 @@
+id: python-no-subprocess-shell
+valid:
+  - |
+      import subprocess
+      subprocess.run(["echo", "hello"], shell=False)
+  - |
+      from subprocess import run
+      run(["echo", "hello"], shell=False)
+invalid:
+  - |
+      import subprocess
+      subprocess.run("echo hello", shell=True)
+  - |
+      from subprocess import run
+      run("echo hello", shell=True)

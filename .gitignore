@@ -13,6 +13,7 @@ Thumbs.db
 # Build Artifacts
 build/
 dist/
+downloads/
 *.o
 *.pyc
 __pycache__/
@@ -28,6 +29,7 @@ __pycache__/
 node_modules/
 vendor/
 venv/
+.venv/
 .env/
 
 # Log Files
