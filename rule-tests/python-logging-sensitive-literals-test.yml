@@ -1,0 +1,13 @@
+id: python-logging-sensitive-literals
+valid:
+  - |
+      import logging
+      logger = logging.getLogger(__name__)
+      logger.info("processing request")
+  - |
+      logger.debug("event=%s", event_id)
+invalid:
+  - |
+      logger.info("password: %s", pw)
+  - |
+      logger.debug("user=%s", user, extra={"ip": ip})

@@ -1,0 +1,16 @@
+id: python-logging-sensitive-literals
+snapshots:
+  ? |
+    logger.debug("user=%s", user, extra={"ip": ip})
+  : labels:
+    - source: 'logger.debug("user=%s", user, extra={"ip": ip})'
+      style: primary
+      start: 0
+      end: 47
+  ? |
+    logger.info("password: %s", pw)
+  : labels:
+    - source: 'logger.info("password: %s", pw)'
+      style: primary
+      start: 0
+      end: 31

@@ -3,7 +3,9 @@ language: python
 message: "Remove or mask sensitive keywords before logging."
 severity: warning
 rule:
-  pattern: $LOGGER.$METHOD($MSG)
+  any:
+    - pattern: $LOGGER.$METHOD($MSG)
+    - pattern: $LOGGER.$METHOD($MSG, $$$REST)
 constraints:
   METHOD:
     matches: python-logger-method

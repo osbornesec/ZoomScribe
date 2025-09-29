@@ -3,7 +3,15 @@ language: python
 message: "Avoid subprocess shell=True; use list arguments with shell=False instead."
 severity: error
 rule:
-  pattern: subprocess.$FUNC($$$ARGS, shell=True, $$$MORE)
+  any:
+    - pattern: subprocess.$FUNC($$$ARGS, shell=True, $$$MORE)
+    - pattern: subprocess.$FUNC($$$ARGS, shell=True)
+    - pattern: subprocess.$FUNC(shell=True, $$$MORE)
+    - pattern: subprocess.$FUNC(shell=True)
+    - pattern: $FUNC($$$ARGS, shell=True, $$$MORE)
+    - pattern: $FUNC($$$ARGS, shell=True)
+    - pattern: $FUNC(shell=True, $$$MORE)
+    - pattern: $FUNC(shell=True)
 constraints:
   FUNC:
     matches: python-subprocess-call
