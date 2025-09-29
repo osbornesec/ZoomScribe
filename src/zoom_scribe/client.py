@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import os
 import time
 from datetime import datetime
@@ -80,7 +81,9 @@ def load_env_credentials(dotenv_path: str | None = None) -> OAuthCredentials:
     ]
     if missing:
         missing_list = ", ".join(missing)
-        raise RuntimeError("Missing Zoom credentials in environment: " + missing_list)
+        raise MissingCredentialsError(
+            "Missing Zoom credentials in environment: " + missing_list
+        )
     assert account_id is not None
     assert client_id is not None
     assert client_secret is not None
@@ -178,6 +181,8 @@ class ZoomAPIClient:
         """Return recordings for the account within the provided date range."""
         start_utc = ensure_utc(start)
         end_utc = ensure_utc(end)
+        if end_utc < start_utc:
+            raise ValueError("end must be greater than or equal to start")
 
         log_params = {
             "from": start_utc.strftime("%Y-%m-%d"),
@@ -258,9 +263,19 @@ class ZoomAPIClient:
     ) -> list[Recording]:
         """Collect meeting recordings within the window and optional host filter."""
         encoded_meeting_id = _encode_uuid(meeting_id)
-        response = self._request("GET", f"past_meetings/{encoded_meeting_id}/instances")
-        payload = response.json()
-        meetings = payload.get("meetings") or []
+        meetings: list[dict[str, Any]] = []
+        try:
+            response = self._request(
+                "GET", f"past_meetings/{encoded_meeting_id}/instances"
+            )
+        except requests.HTTPError as exc:
+            resp = getattr(exc, "response", None)
+            status_code = getattr(resp, "status_code", None)
+            if status_code != 404:
+                raise
+        else:
+            payload = response.json()
+            meetings = payload.get("meetings") or []
 
         recordings: list[Recording] = []
         seen_uuids: set[str] = set()
@@ -365,8 +380,10 @@ class ZoomAPIClient:
 
     def _ensure_access_token(self) -> None:
         """Ensure a valid OAuth access token is cached or fetch a new one."""
+        skew = 60.0  # seconds
         token_expired = bool(
-            self._token_expiry is not None and self._token_expiry <= time.time()
+            self._token_expiry is not None
+            and (self._token_expiry - skew) <= time.time()
         )
         if self._access_token and not token_expired:
             return
@@ -502,12 +519,16 @@ class ZoomAPIClient:
                 return float(retry_after)
             except ValueError:
                 pass
-        return self.backoff_factor * (2**attempt)
+        try:
+            jitter = random.uniform(0.5, 1.5)
+        except Exception:
+            jitter = 1.0
+        return self.backoff_factor * (2**attempt) * jitter
 
 
 __all__ = [
-    "ZoomAPIClient",
-    "load_env_credentials",
     "MissingCredentialsError",
     "TokenRefreshError",
+    "ZoomAPIClient",
+    "load_env_credentials",
 ]
