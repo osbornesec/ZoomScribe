@@ -341,6 +341,16 @@ class ZoomAPIClient:
             request_url = f"{url}{separator}access_token={encoded_token}"
         effective_timeout = self.timeout if timeout is None else self._validate_timeout(timeout)
 
+        # Enforce Zoom host allowlist to reduce SSRF risk when URLs come from the API.
+        try:
+            from urllib.parse import urlparse  # local import keeps top-level tidy
+        except ImportError:  # pragma: no cover - standard library guard
+            urlparse = None
+        if urlparse is not None:
+            host = (urlparse(request_url).hostname or "").lower()
+            if host not in {"zoom.us"} and not host.endswith(".zoom.us"):
+                raise ValueError(f"Refusing to download from non-Zoom host: {host}")
+
         response = self._request(
             "GET",
             request_url,

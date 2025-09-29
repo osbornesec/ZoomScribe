@@ -6,18 +6,23 @@ import os
 import warnings
 
 _NEW_ENV_NAME = "ZOOMSCRIBE_REDACTION_KEY"
-_LEGACY_ENV_NAME = "ZOOM_SCRIBE_REDACTION_KEY"
+_LEGACY_ENV_NAMES = (
+    "ZOOM_SCRIBE_REDACTION_KEY",
+    "ZOOMScribe_REDACTION_KEY",
+)
 
 _REDACTION_KEY = os.getenv(_NEW_ENV_NAME)
 if not _REDACTION_KEY:
-    _LEGACY_REDACTION_KEY = os.getenv(_LEGACY_ENV_NAME)
-    if _LEGACY_REDACTION_KEY:
-        warnings.warn(
-            f"{_LEGACY_ENV_NAME} is deprecated; use {_NEW_ENV_NAME} instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        _REDACTION_KEY = _LEGACY_REDACTION_KEY
+    for legacy_name in _LEGACY_ENV_NAMES:
+        legacy_value = os.getenv(legacy_name)
+        if legacy_value:
+            warnings.warn(
+                f"{legacy_name} is deprecated; use {_NEW_ENV_NAME} instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            _REDACTION_KEY = legacy_value
+            break
 
 
 def _hash_str(value: str) -> str:
