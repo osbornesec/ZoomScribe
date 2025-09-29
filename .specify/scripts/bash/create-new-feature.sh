@@ -7,7 +7,10 @@ ARGS=()
 for arg in "$@"; do
     case "$arg" in
         --json) JSON_MODE=true ;;
-        --help|-h) echo "Usage: $0 [--json] <feature_description>"; exit 0 ;;
+        --help | -h)
+            echo "Usage: $0 [--json] <feature_description>"
+            exit 0
+            ;;
         *) ARGS+=("$arg") ;;
     esac
 done
@@ -36,7 +39,7 @@ find_repo_root() {
 # were initialised with --no-git.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if git rev-parse --show-toplevel >/dev/null 2>&1; then
+if git rev-parse --show-toplevel > /dev/null 2>&1; then
     REPO_ROOT=$(git rev-parse --show-toplevel)
     HAS_GIT=true
 else

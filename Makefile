@@ -11,5 +11,5 @@ lint:
 	sh_files=$$(git ls-files '*.sh'); \
 	if [[ -n $$sh_files ]]; then \
 		if command -v shellcheck >/dev/null 2>&1; then shellcheck $$sh_files; else echo "shellcheck not found, skipping"; fi; \
-		if command -v shfmt >/dev/null 2>&1; then shfmt -d $$sh_files; else echo "shfmt not found, skipping"; fi; \
+		if command -v shfmt >/dev/null 2>&1; then shfmt -d -i 4 -ci -sr $$sh_files; else echo "shfmt not found, skipping"; fi; \
 	else echo "No shell scripts to lint"; fi
