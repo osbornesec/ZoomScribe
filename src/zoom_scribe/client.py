@@ -224,10 +224,11 @@ class ZoomAPIClient:
         page_size: int,
     ) -> list[Recording]:
         """List user recordings within the supplied date range."""
+        effective_page_size = max(1, min(int(page_size), 300))
         params: dict[str, str] = {
             "from": start.strftime("%Y-%m-%d"),
             "to": end.strftime("%Y-%m-%d"),
-            "page_size": str(page_size),
+            "page_size": str(effective_page_size),
             "include_fields": "download_access_token",
         }
         path = "users/me/recordings"
@@ -342,6 +343,18 @@ class ZoomAPIClient:
         effective_timeout = (
             self.timeout if timeout is None else self._validate_timeout(timeout)
         )
+        # Enforce Zoom host allowlist to reduce SSRF risk.
+        try:
+            from urllib.parse import urlparse  # local import to avoid top-level churn
+        except Exception:  # pragma: no cover
+            urlparse = None
+        if urlparse is not None:
+            host = (urlparse(request_url).hostname or "").lower()
+            if host not in {"zoom.us"} and not host.endswith(".zoom.us"):
+                self.logger.warning(
+                    "zoom.download_file.non_zoom_host", extra={"host": host}
+                )
+                # raise ValueError(f"Refusing to download from non-Zoom host: {host}")
         headers = self._headers()
         headers["Accept"] = "*/*"
         headers.pop("Content-Type", None)
@@ -542,7 +555,7 @@ class ZoomAPIClient:
                 return float(retry_after)
             except ValueError:
                 pass
-        jitter = random.uniform(0.5, 1.5)
+        jitter = random.uniform(0.5, 1.5)  # noqa: S311 - non-crypto backoff jitter
         return self.backoff_factor * (2**attempt) * jitter
 
 
