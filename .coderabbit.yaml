@@ -91,7 +91,7 @@ reviews:
     ignore_title_keywords: ["WIP", "wip", "DNM", "do not merge"]
     labels: []
     drafts: true              # review drafts to catch issues early
-    base_branches: ["main", "master", "release/*"]
+    base_branches: ["main", "master", "^release/.+"]
 
   # --- Finishing touches to enforce quality at the PR level ---
   finishing_touches:
@@ -106,7 +106,6 @@ reviews:
       essential_rules: true
       rule_dirs: ["rules"]     # add your custom rules here (see section below)
       util_dirs: ["utils"]
-      packages: ["my-awesome-org/my-awesome-package"]  # example public ast-grep rules
     shellcheck:       { enabled: true }
     ruff:             { enabled: true }
     markdownlint:     { enabled: true }

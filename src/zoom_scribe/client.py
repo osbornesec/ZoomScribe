@@ -37,6 +37,7 @@ except ImportError:  # pragma: no cover
 
 
 from ._datetime import ensure_utc
+from ._redact import redact_identifier, redact_uuid
 from .models import Recording
 
 
@@ -173,9 +174,11 @@ class ZoomAPIClient:
         log_params = {
             "from": start_utc.strftime("%Y-%m-%d"),
             "to": end_utc.strftime("%Y-%m-%d"),
-            "host_email": host_email,
-            "meeting_id": meeting_id,
             "page_size": page_size,
+            "host_email_redacted": redact_identifier(host_email),
+            "meeting_id_redacted": redact_identifier(meeting_id),
+            "has_host_email": bool(host_email),
+            "has_meeting_id": bool(meeting_id),
         }
 
         if meeting_id:
@@ -216,7 +219,8 @@ class ZoomAPIClient:
         }
         path = "users/me/recordings"
         if host_email:
-            path = f"users/{host_email}/recordings"
+            encoded_host_email = quote(host_email, safe="")
+            path = f"users/{encoded_host_email}/recordings"
 
         recordings: list[Recording] = []
         next_page_token: str | None = None
@@ -273,7 +277,7 @@ class ZoomAPIClient:
                 if status_code == 404:
                     self.logger.info(
                         "zoom.list_recordings.missing_instance",
-                        extra={"uuid": uuid},
+                        extra={"uuid_redacted": redact_uuid(uuid)},
                     )
                     continue
                 raise
@@ -315,15 +319,25 @@ class ZoomAPIClient:
         effective_timeout = (
             self.timeout if timeout is None else self._validate_timeout(timeout)
         )
+        headers = self._headers()
+        headers["Accept"] = "*/*"
+        headers.pop("Content-Type", None)
+
         response = self.session.get(
             request_url,
-            headers=self._headers(),
-            stream=True,
+            headers=headers,
             timeout=effective_timeout,
         )
         response.raise_for_status()
-        self.logger.debug("zoom.download_file.success", extra={"url": url})
-        return response.content
+        content = response.content
+        self.logger.debug(
+            "zoom.download_file.success",
+            extra={
+                "bytes": len(content),
+                "included_access_token": bool(access_token),
+            },
+        )
+        return content
 
     def download_recording_file(self, recording_file) -> bytes:
         """Download bytes for a RecordingFile-like object."""
@@ -400,7 +414,7 @@ class ZoomAPIClient:
         while True:
             self.logger.debug(
                 "zoom.request.dispatch",
-                extra={"method": method, "url": url, "attempt": attempt},
+                extra={"method": method, "path": path, "attempt": attempt},
             )
             response = self.session.request(
                 method,
@@ -414,7 +428,11 @@ class ZoomAPIClient:
                 delay = self._compute_backoff(attempt, response)
                 self.logger.warning(
                     "zoom.request.rate_limited",
-                    extra={"url": url, "retry_after": delay, "attempt": attempt},
+                    extra={
+                        "path": path,
+                        "retry_after": delay,
+                        "attempt": attempt,
+                    },
                 )
                 time.sleep(delay)
                 attempt += 1
@@ -431,21 +449,26 @@ class ZoomAPIClient:
             return None
         if isinstance(timeout, bool):
             raise TypeError("Timeout must be a float, tuple, or None")
-        if isinstance(timeout, int | float):
-            if timeout < 0:
+        if isinstance(timeout, (int, float)):
+            numeric_timeout = float(timeout)
+            if numeric_timeout < 0:
                 raise ValueError("Timeout must be non-negative")
-            return float(timeout)
+            return numeric_timeout
         if isinstance(timeout, tuple):
             if len(timeout) != 2:
                 raise ValueError("Timeout tuple must contain exactly two values")
             connect, read = timeout
-            if isinstance(connect, bool) or isinstance(read, bool):
-                raise TypeError("Timeout tuple values must be numeric")
-            connect_timeout = float(connect)
-            read_timeout = float(read)
-            if connect_timeout < 0 or read_timeout < 0:
-                raise ValueError("Timeout values must be non-negative")
-            return (connect_timeout, read_timeout)
+            normalized: list[float] = []
+            for component in (connect, read):
+                if isinstance(component, bool) or not isinstance(
+                    component, (int, float)
+                ):
+                    raise TypeError("Timeout tuple values must be numeric")
+                numeric_component = float(component)
+                if numeric_component < 0:
+                    raise ValueError("Timeout values must be non-negative")
+                normalized.append(numeric_component)
+            return (normalized[0], normalized[1])
         raise TypeError("Timeout must be a float, tuple, or None")
 
     def _compute_backoff(self, attempt: int, response) -> float:
