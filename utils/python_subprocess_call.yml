@@ -1,0 +1,5 @@
+id: python-subprocess-call
+language: python
+rule:
+  kind: identifier
+  regex: "^(run|Popen|call|check_call|check_output)$"

@@ -1,0 +1,5 @@
+id: python-logger-method
+language: python
+rule:
+  kind: identifier
+  regex: "^(debug|info|warning|error|critical|exception)$"
