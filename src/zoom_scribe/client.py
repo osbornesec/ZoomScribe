@@ -2,56 +2,24 @@ from __future__ import annotations
 
 import logging
 import random
-import os
 import time
 from datetime import datetime
-from typing import IO, Any, TypedDict
+from typing import Any
 from urllib.parse import quote, urljoin
 
 import requests
 
-try:
-    from dotenv import find_dotenv, load_dotenv
-except ImportError:  # pragma: no cover
-
-    def find_dotenv(
-        filename: str = "",
-        raise_error_if_not_found: bool = False,
-        usecwd: bool = False,
-    ) -> str:
-        """Return the provided dotenv filename or an empty string."""
-        _ = raise_error_if_not_found  # pragma: no cover - unused in stub
-        _ = usecwd  # pragma: no cover - unused in stub
-        return filename or ""
-
-    def load_dotenv(
-        dotenv_path: str | os.PathLike[str] | None = None,
-        stream: IO[str] | None = None,
-        verbose: bool = False,
-        override: bool = False,
-        interpolate: bool = True,
-        encoding: str | None = None,
-    ) -> bool:
-        """Stub load_dotenv that always reports no file was loaded."""
-        _ = (dotenv_path, stream, verbose, override, interpolate, encoding)
-        return False
-
 
 from ._datetime import ensure_utc
 from ._redact import redact_identifier, redact_uuid
+from .config import ConfigurationError, load_oauth_credentials
 from .models import Recording, RecordingFile
-
-
-class OAuthCredentials(TypedDict):
-    account_id: str
-    client_id: str
-    client_secret: str
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class MissingCredentialsError(RuntimeError):
+class MissingCredentialsError(ConfigurationError):
     """Raised when required OAuth credentials are missing."""
 
 
@@ -59,39 +27,14 @@ class TokenRefreshError(RuntimeError):
     """Raised when an access token cannot be refreshed."""
 
 
-def load_env_credentials(dotenv_path: str | None = None) -> OAuthCredentials:
-    """Load Zoom OAuth credentials from a .env file or the environment."""
-    if dotenv_path:
-        resolved_path = find_dotenv(dotenv_path, raise_error_if_not_found=False)
-    else:
-        resolved_path = find_dotenv(raise_error_if_not_found=False)
-    if resolved_path:
-        load_dotenv(resolved_path, override=False)
-    account_id = os.getenv("ZOOM_ACCOUNT_ID")
-    client_id = os.getenv("ZOOM_CLIENT_ID")
-    client_secret = os.getenv("ZOOM_CLIENT_SECRET")
-    missing = [
-        name
-        for name, value in (
-            ("ZOOM_ACCOUNT_ID", account_id),
-            ("ZOOM_CLIENT_ID", client_id),
-            ("ZOOM_CLIENT_SECRET", client_secret),
-        )
-        if not value
-    ]
-    if missing:
-        missing_list = ", ".join(missing)
-        raise MissingCredentialsError(
-            "Missing Zoom credentials in environment: " + missing_list
-        )
-    assert account_id is not None
-    assert client_id is not None
-    assert client_secret is not None
-    return {
-        "account_id": account_id,
-        "client_id": client_id,
-        "client_secret": client_secret,
-    }
+def load_env_credentials(dotenv_path: str | None = None) -> dict[str, str]:
+    """Load Zoom OAuth credentials from the environment into a plain dictionary."""
+
+    try:
+        credentials = load_oauth_credentials(dotenv_path=dotenv_path)
+    except ConfigurationError as exc:  # pragma: no cover - translators handle tests
+        raise MissingCredentialsError(str(exc)) from exc
+    return dict(credentials.to_dict())
 
 
 def _double_urlencode(value: str) -> str:
