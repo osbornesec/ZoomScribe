@@ -350,9 +350,20 @@ class ZoomAPIClient:
             request_url,
             headers=headers,
             timeout=effective_timeout,
+            stream=True,
         )
         response.raise_for_status()
-        content = response.content
+        if hasattr(response, "iter_content"):
+            chunks = []
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    chunks.append(chunk)
+            content = b"".join(chunks)
+        else:
+            content = response.content
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
         self.logger.debug(
             "zoom.download_file.success",
             extra={
@@ -435,6 +446,7 @@ class ZoomAPIClient:
             self.timeout if timeout is None else self._validate_timeout(timeout)
         )
         safe_path = self._path_template_for_log(path)
+        auth_refreshed = False
         while True:
             self.logger.debug(
                 "zoom.request.dispatch",
@@ -460,6 +472,17 @@ class ZoomAPIClient:
                 )
                 time.sleep(delay)
                 attempt += 1
+                continue
+            if response.status_code == 401 and not auth_refreshed:
+                response.close()
+                self.logger.info(
+                    "zoom.request.unauthorized_retry",
+                    extra={"path": safe_path},
+                )
+                self._access_token = None
+                self._token_expiry = 0.0
+                self._ensure_access_token()
+                auth_refreshed = True
                 continue
             response.raise_for_status()
             return response
@@ -519,10 +542,7 @@ class ZoomAPIClient:
                 return float(retry_after)
             except ValueError:
                 pass
-        try:
-            jitter = random.uniform(0.5, 1.5)
-        except Exception:
-            jitter = 1.0
+        jitter = random.uniform(0.5, 1.5)
         return self.backoff_factor * (2**attempt) * jitter
 
 
