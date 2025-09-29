@@ -13,6 +13,7 @@ Thumbs.db
 # Build Artifacts
 build/
 dist/
+downloads/
 *.o
 *.pyc
 __pycache__/
