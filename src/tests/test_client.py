@@ -15,17 +15,20 @@ class StubResponse:
         self.status_code = status_code
         self.headers = headers or {}
         self.text = str(payload)
+        self.reason = self.headers.get("reason", f"HTTP {status_code}")
 
     def json(self):
         """Return the stored payload."""
         return self._payload
 
-    def raise_for_status(self):
-        """Raise an HTTPError when the stubbed status code is an error."""
-        if self.status_code >= 400:
-            error = requests.HTTPError(f"HTTP {self.status_code}")
-            error.response = self
-            raise error
+    def iter_content(self, chunk_size=8192):  # pragma: no cover - streaming stub
+        if isinstance(self._payload, bytes):
+            yield self._payload
+        else:
+            yield b""
+
+    def close(self):  # pragma: no cover - needed for client cleanup
+        return None
 
 
 class DummySession:
@@ -46,7 +49,7 @@ class DummySession:
 def client_factory(monkeypatch):
     """Return a factory that wires a ZoomAPIClient to a DummySession."""
 
-    def _factory(responses):
+    def _factory(responses, *, sleeper=None):
         session = DummySession(responses)
         client = ZoomAPIClient(
             account_id="account",
@@ -56,6 +59,7 @@ def client_factory(monkeypatch):
             access_token="token-123",
             max_retries=3,
             backoff_factor=0.01,
+            sleeper=sleeper,
         )
         return client, session
 
@@ -102,21 +106,17 @@ def test_list_recordings_returns_recording_models(client_factory):
     assert session.calls[0][2]["timeout"] == 10.0
 
 
-def test_list_recordings_normalizes_naive_datetimes(client_factory):
+def test_list_recordings_rejects_naive_datetimes(client_factory):
     responses = [
         StubResponse({"meetings": [make_meeting("uuid-1")], "next_page_token": ""}),
     ]
-    client, session = client_factory(responses)
+    client, _ = client_factory(responses)
 
-    recordings = client.list_recordings(
-        start=datetime(2025, 9, 1),
-        end=datetime(2025, 9, 30),
-    )
-
-    assert len(recordings) == 1
-    params = session.calls[0][2]["params"]
-    assert params["from"] == "2025-09-01"
-    assert params["to"] == "2025-09-30"
+    with pytest.raises(ValueError):
+        client.list_recordings(
+            start=datetime(2025, 9, 1),
+            end=datetime(2025, 9, 30),
+        )
 
 
 def test_list_recordings_paginates_until_next_page_empty(client_factory):
@@ -135,20 +135,18 @@ def test_list_recordings_paginates_until_next_page_empty(client_factory):
     assert session.calls[1][2]["params"]["next_page_token"] == "abc"
 
 
-def test_list_recordings_retries_on_rate_limit(monkeypatch, client_factory):
+def test_list_recordings_retries_on_rate_limit(client_factory):
     responses = [
         StubResponse({}, status_code=429, headers={"Retry-After": "1"}),
         StubResponse({"meetings": [make_meeting("uuid-3")], "next_page_token": ""}),
     ]
-    client, session = client_factory(responses)
-
     sleep_calls = []
 
     def fake_sleep(seconds):
         """Record the requested sleep duration for assertions."""
         sleep_calls.append(seconds)
 
-    monkeypatch.setattr("zoom_scribe.client.time.sleep", fake_sleep)
+    client, session = client_factory(responses, sleeper=fake_sleep)
 
     recordings = client.list_recordings(
         start=datetime(2025, 9, 1, tzinfo=UTC),
@@ -207,20 +205,19 @@ def test_list_recordings_meeting_id_fallback_to_direct_lookup(client_factory):
     assert session.calls[1][1].endswith("meetings/123456/recordings")
 
 
-def test_list_recordings_meeting_id_accepts_naive_datetimes(client_factory):
+def test_list_recordings_meeting_id_requires_aware_datetimes(client_factory):
     responses = [
         StubResponse({"meetings": [{"uuid": "uuid-5"}]}),
         StubResponse(make_meeting("uuid-5")),
     ]
     client, _ = client_factory(responses)
 
-    recordings = client.list_recordings(
-        start=datetime(2025, 9, 1),
-        end=datetime(2025, 9, 30),
-        meeting_id="meeting-uuid",
-    )
-
-    assert [rec.uuid for rec in recordings] == ["uuid-5"]
+    with pytest.raises(ValueError):
+        client.list_recordings(
+            start=datetime(2025, 9, 1),
+            end=datetime(2025, 9, 30),
+            meeting_id="meeting-uuid",
+        )
 
 
 def test_list_recordings_meeting_id_honors_host_filter(client_factory):
@@ -281,76 +278,38 @@ def test_list_recordings_skips_missing_instance(client_factory):
     assert session.calls[1][1].endswith("meetings/missing/recordings")
 
 
-def test_download_file_encodes_access_token():
-    class DownloadSession:
+def test_download_file_encodes_access_token(client_factory):
+    class StreamResponse(StubResponse):
         def __init__(self):
-            self.calls = []
+            super().__init__(b"ok")
 
-        def get(self, url, headers=None, stream=False, **kwargs):
-            self.calls.append((url, headers, stream, kwargs))
+        def json(self):  # pragma: no cover - streaming payload
+            raise ValueError("no json")
 
-            class Response:
-                status_code = 200
-
-                def raise_for_status(self):
-                    return None
-
-                @property
-                def content(self):
-                    return b"ok"
-
-            return Response()
-
-        def request(self, *args, **kwargs):
-            raise AssertionError("request should not be called in this test")
-
-    session = DownloadSession()
-    client = ZoomAPIClient(
-        account_id="account",
-        client_id="id",
-        client_secret="secret",
-        session=cast(requests.Session, session),
-        access_token="token-123",
-    )
+    responses = [StreamResponse()]
+    client, session = client_factory(responses)
 
     client.download_file(url="https://zoom.us/download/file", access_token="abc+/=")
 
-    url, _, _, kwargs = session.calls[0]
+    method, url, kwargs = session.calls[0]
+    assert method == "GET"
     assert "access_token=abc%2B%2F%3D" in url
     assert kwargs["timeout"] == 10.0
+    headers = kwargs["headers"]
+    assert headers.get("Accept") == "*/*"
+    assert "Content-Type" not in headers
 
 
-def test_download_file_allows_timeout_override():
-    class DownloadSession:
+def test_download_file_allows_timeout_override(client_factory):
+    class StreamResponse(StubResponse):
         def __init__(self):
-            self.calls = []
+            super().__init__(b"ok")
 
-        def get(self, url, headers=None, stream=False, **kwargs):
-            self.calls.append((url, headers, stream, kwargs))
+        def json(self):  # pragma: no cover - streaming payload
+            raise ValueError("no json")
 
-            class Response:
-                status_code = 200
-
-                def raise_for_status(self):
-                    return None
-
-                @property
-                def content(self):
-                    return b"ok"
-
-            return Response()
-
-        def request(self, *args, **kwargs):
-            raise AssertionError("request should not be called in this test")
-
-    session = DownloadSession()
-    client = ZoomAPIClient(
-        account_id="account",
-        client_id="id",
-        client_secret="secret",
-        session=cast(requests.Session, session),
-        access_token="token-123",
-    )
+    responses = [StreamResponse()]
+    client, session = client_factory(responses)
 
     client.download_file(
         url="https://zoom.us/download/file",
@@ -358,7 +317,8 @@ def test_download_file_allows_timeout_override():
         timeout=5.0,
     )
 
-    _, _, _, kwargs = session.calls[0]
+    method, url, kwargs = session.calls[0]
+    assert method == "GET"
     assert kwargs["timeout"] == 5.0
 
 
