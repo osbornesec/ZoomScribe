@@ -18,7 +18,9 @@ class StubResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise requests.HTTPError(f"HTTP {self.status_code}")
+            error = requests.HTTPError(f"HTTP {self.status_code}")
+            error.response = self
+            raise error
 
 
 class DummySession:
@@ -195,12 +197,8 @@ def test_list_recordings_meeting_id_honors_host_filter(client_factory):
 def test_list_recordings_meeting_id_with_single_slash_is_not_double_encoded(
     client_factory,
 ):
-    """
-    Assert that a UUID with slashes, but not at the start, is not double-encoded.
+    """UUIDs with single slashes should be encoded only once."""
 
-    The Zoom API specifies only UUIDs starting with / or containing // need
-    double-encoding.
-    """
     uuid_with_slash = "a/b/c"
     responses = [
         StubResponse({"meetings": [{"uuid": uuid_with_slash}]}),
@@ -217,3 +215,61 @@ def test_list_recordings_meeting_id_with_single_slash_is_not_double_encoded(
     assert len(session.calls) == 2
     encoded_path = session.calls[1][1]
     assert "meetings/a%2Fb%2Fc/recordings" in encoded_path
+
+
+def test_list_recordings_skips_missing_instance(client_factory):
+    responses = [
+        StubResponse({"meetings": [{"uuid": "missing"}, {"uuid": "present"}]}),
+        StubResponse({}, status_code=404),
+        StubResponse(make_meeting("present")),
+    ]
+    client, session = client_factory(responses)
+
+    recordings = client.list_recordings(
+        start=datetime(2025, 9, 1, tzinfo=UTC),
+        end=datetime(2025, 9, 30, tzinfo=UTC),
+        meeting_id="123456",
+    )
+
+    assert [rec.uuid for rec in recordings] == ["present"]
+    assert session.calls[1][1].endswith("meetings/missing/recordings")
+
+
+def test_download_file_encodes_access_token():
+    class DownloadSession:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, headers=None, stream=False):
+            self.calls.append((url, headers, stream))
+
+            class Response:
+                status_code = 200
+
+                def raise_for_status(self):
+                    return None
+
+                @property
+                def content(self):
+                    return b"ok"
+
+            return Response()
+
+        def request(self, *args, **kwargs):
+            raise AssertionError("request should not be called in this test")
+
+    session = DownloadSession()
+    client = ZoomAPIClient(
+        account_id="account",
+        client_id="id",
+        client_secret="secret",
+        session=session,
+        access_token="token-123",
+    )
+
+    client.download_file(
+        url="https://zoom.us/download/file", access_token="abc+/="
+    )
+
+    url, _, _ = session.calls[0]
+    assert "access_token=abc%2B%2F%3D" in url

@@ -214,8 +214,19 @@ class ZoomAPIClient:
             instance_uuids = [meeting_id]
 
         for uuid in instance_uuids:
-            meeting_payload = self._fetch_meeting_recording(uuid)
-            if not meeting_payload:
+            try:
+                meeting_payload = self._fetch_meeting_recording(uuid)
+            except requests.HTTPError as exc:
+                response = getattr(exc, "response", None)
+                status_code = getattr(response, "status_code", None)
+                if status_code == 404:
+                    self.logger.info(
+                        "zoom.list_recordings.missing_instance",
+                        extra={"uuid": uuid},
+                    )
+                    continue
+                raise
+            if not meeting_payload.get("recording_files"):
                 continue
             recording = Recording.from_api(meeting_payload)
             if recording.start_time < start or recording.start_time > end:
@@ -241,7 +252,8 @@ class ZoomAPIClient:
         request_url = url
         if access_token:
             separator = "&" if "?" in url else "?"
-            request_url = f"{url}{separator}access_token={access_token}"
+            encoded_token = quote(access_token, safe="")
+            request_url = f"{url}{separator}access_token={encoded_token}"
         response = self.session.get(request_url, headers=self._headers(), stream=True)
         response.raise_for_status()
         self.logger.debug("zoom.download_file.success", extra={"url": url})
