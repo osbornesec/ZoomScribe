@@ -42,77 +42,62 @@ def test_build_file_path_sanitizes_components(sample_recording):
     assert "?" not in path_str
 
 
-def test_download_creates_directories_and_writes_files(monkeypatch, sample_recording):
+def test_download_creates_directories_and_writes_files(tmp_path, sample_recording):
     client = Mock()
     client.download_file.return_value = b"binary-data"
-    downloader = RecordingDownloader(client)
+    downloader = RecordingDownloader(client, max_workers=1)
 
-    created_dirs = []
-    written = {}
+    downloader.download([sample_recording], tmp_path, dry_run=False, overwrite=False)
 
-    def fake_mkdir(self, parents=False, exist_ok=False):
-        created_dirs.append((str(self), parents, exist_ok))
-
-    def fake_write_bytes(self, data):
-        written[str(self)] = data
-
-    monkeypatch.setattr("zoom_scribe.downloader.Path.mkdir", fake_mkdir, raising=False)
-    monkeypatch.setattr(
-        "zoom_scribe.downloader.Path.write_bytes", fake_write_bytes, raising=False
-    )
-    monkeypatch.setattr(
-        "zoom_scribe.downloader.Path.exists", lambda self: False, raising=False
-    )
-
-    downloader.download(
-        [sample_recording], "/downloads", dry_run=False, overwrite=False
-    )
-
-    assert client.download_file.called
-    assert written, "Expected bytes to be written to a file"
-    destination = next(iter(written.keys()))
-    assert "Project__Kickoff_" in destination
-    assert created_dirs, "Expected directory creation to be attempted"
+    recording_file = sample_recording.recording_files[0]
+    destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
+    assert destination.exists()
+    assert destination.read_bytes() == b"binary-data"
+    assert not destination.with_suffix(destination.suffix + ".part").exists()
+    client.download_file.assert_called_once()
 
 
-def test_download_skips_existing_file_without_overwrite(monkeypatch, sample_recording):
+def test_download_skips_existing_file_without_overwrite(tmp_path, sample_recording):
     client = Mock()
-    downloader = RecordingDownloader(client)
+    downloader = RecordingDownloader(client, max_workers=1)
 
-    def fail_write(self, data):
-        raise AssertionError("should not write")
+    recording_file = sample_recording.recording_files[0]
+    destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"existing")
 
-    monkeypatch.setattr(
-        "zoom_scribe.downloader.Path.exists", lambda self: True, raising=False
-    )
-    monkeypatch.setattr(
-        "zoom_scribe.downloader.Path.write_bytes", fail_write, raising=False
-    )
-
-    downloader.download(
-        [sample_recording], "/downloads", dry_run=False, overwrite=False
-    )
+    downloader.download([sample_recording], tmp_path, dry_run=False, overwrite=False)
 
     client.download_file.assert_not_called()
+    assert destination.read_bytes() == b"existing"
 
 
-def test_download_in_dry_run_mode(monkeypatch, sample_recording):
+def test_download_overwrites_when_requested(tmp_path, sample_recording):
     client = Mock()
-    downloader = RecordingDownloader(client)
+    client.download_file.return_value = b"new-data"
+    downloader = RecordingDownloader(client, max_workers=1)
 
-    def fail_write(self, data):
-        raise AssertionError("dry run should not write")
+    recording_file = sample_recording.recording_files[0]
+    destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"old-data")
 
-    monkeypatch.setattr(
-        "zoom_scribe.downloader.Path.exists", lambda self: False, raising=False
-    )
-    monkeypatch.setattr(
-        "zoom_scribe.downloader.Path.write_bytes", fail_write, raising=False
-    )
+    downloader.download([sample_recording], tmp_path, dry_run=False, overwrite=True)
 
-    downloader.download([sample_recording], "/downloads", dry_run=True, overwrite=False)
+    client.download_file.assert_called_once()
+    assert destination.read_bytes() == b"new-data"
+
+
+def test_download_in_dry_run_mode(tmp_path, sample_recording):
+    client = Mock()
+    downloader = RecordingDownloader(client, max_workers=1)
+
+    downloader.download([sample_recording], tmp_path, dry_run=True, overwrite=False)
 
     client.download_file.assert_not_called()
+    recording_file = sample_recording.recording_files[0]
+    destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
+    assert not destination.exists()
 
 
 @pytest.mark.parametrize("value", [".", "..", "...", "...."])
