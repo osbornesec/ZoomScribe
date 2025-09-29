@@ -20,6 +20,7 @@
 - Tests use pytest; name files `test_<module>.py` and functions `test_<behavior>()`.
 - Cover API edge cases (pagination, retries, double-encoded UUIDs) when modifying client logic.
 - CI expects all tests to pass locally before pushing; include new tests for bug fixes or features.
+- After finishing code changes, run formatting, linting, type checking, and the full test suite locally to catch issues early.
 
 ## Commit & Pull Request Guidelines
 - Follow concise commits (imperative mood, e.g., “Add recurring meeting lookup”); group related changes together.
