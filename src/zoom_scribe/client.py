@@ -351,10 +351,9 @@ class ZoomAPIClient:
         if urlparse is not None:
             host = (urlparse(request_url).hostname or "").lower()
             if host not in {"zoom.us"} and not host.endswith(".zoom.us"):
-                self.logger.warning(
-                    "zoom.download_file.non_zoom_host", extra={"host": host}
+                raise ValueError(
+                    f"Refusing to download from non-Zoom host: {host}"
                 )
-                # raise ValueError(f"Refusing to download from non-Zoom host: {host}")
         headers = self._headers()
         headers["Accept"] = "*/*"
         headers.pop("Content-Type", None)
