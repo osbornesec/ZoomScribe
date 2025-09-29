@@ -1,6 +1,21 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import os
+
+
+_REDACTION_KEY = os.getenv("ZOOMScribe_REDACTION_KEY")
+
+
+def _hash_str(value: str) -> str:
+    """Return a deterministic hash using HMAC when a secret key is provided."""
+    data = value.encode("utf-8")
+    if _REDACTION_KEY:
+        digest = hmac.new(_REDACTION_KEY.encode("utf-8"), data, hashlib.sha256)
+    else:
+        digest = hashlib.sha256(data)
+    return f"sha256:{digest.hexdigest()[:32]}"
 
 
 def redact_identifier(value: str | None) -> str | None:
@@ -12,8 +27,7 @@ def redact_identifier(value: str | None) -> str | None:
     if not normalized:
         return ""
 
-    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-    return f"sha256:{digest[:32]}"
+    return _hash_str(normalized)
 
 
 def redact_uuid(value: str | None) -> str | None:

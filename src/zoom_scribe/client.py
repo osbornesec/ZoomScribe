@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover
 
 from ._datetime import ensure_utc
 from ._redact import redact_identifier, redact_uuid
-from .models import Recording
+from .models import Recording, RecordingFile
 
 
 class OAuthCredentials(TypedDict):
@@ -48,6 +48,14 @@ class OAuthCredentials(TypedDict):
 
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class MissingCredentialsError(RuntimeError):
+    """Raised when required OAuth credentials are missing."""
+
+
+class TokenRefreshError(RuntimeError):
+    """Raised when an access token cannot be refreshed."""
 
 
 def load_env_credentials(dotenv_path: str | None = None) -> OAuthCredentials:
@@ -339,7 +347,7 @@ class ZoomAPIClient:
         )
         return content
 
-    def download_recording_file(self, recording_file) -> bytes:
+    def download_recording_file(self, recording_file: RecordingFile) -> bytes:
         """Download bytes for a RecordingFile-like object."""
         access_token = recording_file.download_access_token
         return self.download_file(
@@ -366,12 +374,10 @@ class ZoomAPIClient:
             return
         if not all([self.account_id, self.client_id, self.client_secret]):
             if self._access_token and token_expired:
-                raise RuntimeError(
-                    "Expired access token cannot be refreshed without OAuth credentials"
+                raise TokenRefreshError(
+                    "Cannot refresh access token without OAuth credentials"
                 )
-            raise RuntimeError(
-                "OAuth credentials are required to fetch an access token"
-            )
+            raise MissingCredentialsError("OAuth credentials are required")
 
         self.logger.debug(
             "zoom.auth.request_token", extra={"token_url": self.token_url}
@@ -411,10 +417,11 @@ class ZoomAPIClient:
         effective_timeout = (
             self.timeout if timeout is None else self._validate_timeout(timeout)
         )
+        safe_path = self._path_template_for_log(path)
         while True:
             self.logger.debug(
                 "zoom.request.dispatch",
-                extra={"method": method, "path": path, "attempt": attempt},
+                extra={"method": method, "path": safe_path, "attempt": attempt},
             )
             response = self.session.request(
                 method,
@@ -429,7 +436,7 @@ class ZoomAPIClient:
                 self.logger.warning(
                     "zoom.request.rate_limited",
                     extra={
-                        "path": path,
+                        "path": safe_path,
                         "retry_after": delay,
                         "attempt": attempt,
                     },
@@ -439,6 +446,22 @@ class ZoomAPIClient:
                 continue
             response.raise_for_status()
             return response
+
+    @staticmethod
+    def _path_template_for_log(path: str) -> str:
+        """Return a path string with identifiers masked for logging."""
+        sensitive_containers = {"users", "meetings", "past_meetings"}
+        masked_segments: list[str] = []
+        mask_next = False
+        path_only, _, _ = path.partition("?")
+        for segment in path_only.split("/"):
+            if mask_next and segment:
+                masked_segments.append(":id")
+                mask_next = False
+                continue
+            masked_segments.append(segment)
+            mask_next = segment in sensitive_containers
+        return "/".join(masked_segments)
 
     @staticmethod
     def _validate_timeout(
@@ -482,4 +505,9 @@ class ZoomAPIClient:
         return self.backoff_factor * (2**attempt)
 
 
-__all__ = ["ZoomAPIClient", "load_env_credentials"]
+__all__ = [
+    "ZoomAPIClient",
+    "load_env_credentials",
+    "MissingCredentialsError",
+    "TokenRefreshError",
+]
