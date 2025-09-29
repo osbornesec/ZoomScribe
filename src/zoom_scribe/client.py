@@ -129,6 +129,7 @@ class ZoomAPIClient:
         access_token: str | None = None,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
+        timeout: float | tuple[float, float] | None = 10.0,
         logger: logging.Logger | None = None,
     ) -> None:
         """Initialize the client with credentials, HTTP settings, and logging."""
@@ -140,6 +141,7 @@ class ZoomAPIClient:
         self.session = session or requests.Session()
         self.max_retries = max(0, max_retries)
         self.backoff_factor = max(0.0, backoff_factor)
+        self.timeout = self._validate_timeout(timeout)
         self._access_token = access_token
         self._token_expiry: float | None = None
         self.logger = logger or _LOGGER
@@ -296,7 +298,13 @@ class ZoomAPIClient:
         )
         return response.json()
 
-    def download_file(self, *, url: str, access_token: str | None = None) -> bytes:
+    def download_file(
+        self,
+        *,
+        url: str,
+        access_token: str | None = None,
+        timeout: float | tuple[float, float] | None = None,
+    ) -> bytes:
         """Download a file, appending the access token when provided."""
         self._ensure_access_token()
         request_url = url
@@ -304,7 +312,15 @@ class ZoomAPIClient:
             separator = "&" if "?" in url else "?"
             encoded_token = quote(access_token, safe="")
             request_url = f"{url}{separator}access_token={encoded_token}"
-        response = self.session.get(request_url, headers=self._headers(), stream=True)
+        effective_timeout = (
+            self.timeout if timeout is None else self._validate_timeout(timeout)
+        )
+        response = self.session.get(
+            request_url,
+            headers=self._headers(),
+            stream=True,
+            timeout=effective_timeout,
+        )
         response.raise_for_status()
         self.logger.debug("zoom.download_file.success", extra={"url": url})
         return response.content
@@ -327,17 +343,18 @@ class ZoomAPIClient:
 
     def _ensure_access_token(self) -> None:
         """Ensure a valid OAuth access token is cached or fetch a new one."""
-        if (
-            self._access_token
-            and self._token_expiry
-            and self._token_expiry > time.time()
-        ):
+        token_expired = bool(
+            self._token_expiry is not None and self._token_expiry <= time.time()
+        )
+        if self._access_token and not token_expired:
             return
         if self._access_token and self._token_expiry is None:
             return
         if not all([self.account_id, self.client_id, self.client_secret]):
-            if self._access_token:
-                return
+            if self._access_token and token_expired:
+                raise RuntimeError(
+                    "Expired access token cannot be refreshed without OAuth credentials"
+                )
             raise RuntimeError(
                 "OAuth credentials are required to fetch an access token"
             )
@@ -352,6 +369,7 @@ class ZoomAPIClient:
             self.token_url,
             data={"grant_type": "account_credentials", "account_id": self.account_id},
             auth=(self.client_id, self.client_secret),
+            timeout=self.timeout,
         )
         response.raise_for_status()
         payload = response.json()
@@ -370,11 +388,15 @@ class ZoomAPIClient:
         *,
         params: dict[str, str] | None = None,
         json: dict[str, str] | None = None,
+        timeout: float | tuple[float, float] | None = None,
     ):
         """Send an HTTP request and retry automatically on HTTP 429 responses."""
         self._ensure_access_token()
         url = urljoin(self.base_url, path)
         attempt = 0
+        effective_timeout = (
+            self.timeout if timeout is None else self._validate_timeout(timeout)
+        )
         while True:
             self.logger.debug(
                 "zoom.request.dispatch",
@@ -386,6 +408,7 @@ class ZoomAPIClient:
                 params=params,
                 json=json,
                 headers=self._headers(),
+                timeout=effective_timeout,
             )
             if response.status_code == 429 and attempt < self.max_retries:
                 delay = self._compute_backoff(attempt, response)
@@ -398,6 +421,32 @@ class ZoomAPIClient:
                 continue
             response.raise_for_status()
             return response
+
+    @staticmethod
+    def _validate_timeout(
+        timeout: float | tuple[float, float] | None,
+    ) -> float | tuple[float, float] | None:
+        """Ensure a timeout is either ``None``, a non-negative float, or tuple."""
+        if timeout is None:
+            return None
+        if isinstance(timeout, bool):
+            raise TypeError("Timeout must be a float, tuple, or None")
+        if isinstance(timeout, int | float):
+            if timeout < 0:
+                raise ValueError("Timeout must be non-negative")
+            return float(timeout)
+        if isinstance(timeout, tuple):
+            if len(timeout) != 2:
+                raise ValueError("Timeout tuple must contain exactly two values")
+            connect, read = timeout
+            if isinstance(connect, bool) or isinstance(read, bool):
+                raise TypeError("Timeout tuple values must be numeric")
+            connect_timeout = float(connect)
+            read_timeout = float(read)
+            if connect_timeout < 0 or read_timeout < 0:
+                raise ValueError("Timeout values must be non-negative")
+            return (connect_timeout, read_timeout)
+        raise TypeError("Timeout must be a float, tuple, or None")
 
     def _compute_backoff(self, attempt: int, response) -> float:
         """Compute the retry delay using Retry-After or exponential backoff."""

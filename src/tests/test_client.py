@@ -1,4 +1,6 @@
+import time
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 import requests
@@ -50,7 +52,7 @@ def client_factory(monkeypatch):
             account_id="account",
             client_id="id",
             client_secret="secret",
-            session=session,
+            session=cast(requests.Session, session),
             access_token="token-123",
             max_retries=3,
             backoff_factor=0.01,
@@ -97,6 +99,7 @@ def test_list_recordings_returns_recording_models(client_factory):
     params = session.calls[0][2]["params"]
     assert params["from"] == "2025-09-01"
     assert params["to"] == "2025-09-30"
+    assert session.calls[0][2]["timeout"] == 10.0
 
 
 def test_list_recordings_normalizes_naive_datetimes(client_factory):
@@ -155,6 +158,7 @@ def test_list_recordings_retries_on_rate_limit(monkeypatch, client_factory):
     assert [rec.uuid for rec in recordings] == ["uuid-3"]
     assert len(session.calls) == 2
     assert sleep_calls, "Expected exponential backoff sleep to be triggered"
+    assert session.calls[0][2]["timeout"] == 10.0
 
 
 def test_list_recordings_enumerates_meeting_instances(client_factory):
@@ -282,8 +286,8 @@ def test_download_file_encodes_access_token():
         def __init__(self):
             self.calls = []
 
-        def get(self, url, headers=None, stream=False):
-            self.calls.append((url, headers, stream))
+        def get(self, url, headers=None, stream=False, **kwargs):
+            self.calls.append((url, headers, stream, kwargs))
 
             class Response:
                 status_code = 200
@@ -305,11 +309,66 @@ def test_download_file_encodes_access_token():
         account_id="account",
         client_id="id",
         client_secret="secret",
-        session=session,
+        session=cast(requests.Session, session),
         access_token="token-123",
     )
 
     client.download_file(url="https://zoom.us/download/file", access_token="abc+/=")
 
-    url, _, _ = session.calls[0]
+    url, _, _, kwargs = session.calls[0]
     assert "access_token=abc%2B%2F%3D" in url
+    assert kwargs["timeout"] == 10.0
+
+
+def test_download_file_allows_timeout_override():
+    class DownloadSession:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, headers=None, stream=False, **kwargs):
+            self.calls.append((url, headers, stream, kwargs))
+
+            class Response:
+                status_code = 200
+
+                def raise_for_status(self):
+                    return None
+
+                @property
+                def content(self):
+                    return b"ok"
+
+            return Response()
+
+        def request(self, *args, **kwargs):
+            raise AssertionError("request should not be called in this test")
+
+    session = DownloadSession()
+    client = ZoomAPIClient(
+        account_id="account",
+        client_id="id",
+        client_secret="secret",
+        session=cast(requests.Session, session),
+        access_token="token-123",
+    )
+
+    client.download_file(
+        url="https://zoom.us/download/file",
+        access_token=None,
+        timeout=5.0,
+    )
+
+    _, _, _, kwargs = session.calls[0]
+    assert kwargs["timeout"] == 5.0
+
+
+def test_ensure_access_token_raises_when_expired_without_credentials():
+    session = DummySession([])
+    client = ZoomAPIClient(
+        session=cast(requests.Session, session),
+        access_token="token-1",
+    )
+    client._token_expiry = time.time() - 10
+
+    with pytest.raises(RuntimeError):
+        client._ensure_access_token()
