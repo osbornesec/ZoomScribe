@@ -4,15 +4,25 @@ import logging
 import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import Protocol, cast, runtime_checkable
 
 from .models import Recording, RecordingFile
 
 _SANITIZE_PATTERN = re.compile(r"[^A-Za-z0-9._@-]")
 
 
+@runtime_checkable
+class _Readable(Protocol):
+    def read(self) -> bytes:
+        """Return the bytes content for a stream-like object."""
+        ...
+
+
 def _sanitize(value: str) -> str:
     """Sanitize a path component so it is safe to use on local filesystems."""
     sanitized = _SANITIZE_PATTERN.sub("_", value or "")
+    if sanitized and set(sanitized) <= {"."}:
+        sanitized = "_"
     sanitized = re.sub(r"_{3,}", "__", sanitized)
     return sanitized or "unknown"
 
@@ -93,7 +103,9 @@ class RecordingDownloader:
             data = self.client.download_recording_file(recording_file)
         if isinstance(data, bytes):
             return data
-        if hasattr(data, "read"):
+        if isinstance(data, _Readable):
             return data.read()
-        chunks: Iterable[bytes] = data
-        return b"".join(chunks)
+        if isinstance(data, Iterable):
+            chunks = cast(Iterable[bytes], data)
+            return b"".join(chunks)
+        raise TypeError("Expected bytes or iterable of bytes from client download")

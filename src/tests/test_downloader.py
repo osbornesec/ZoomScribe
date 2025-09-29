@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from zoom_scribe.downloader import RecordingDownloader
+from zoom_scribe.downloader import RecordingDownloader, _sanitize
 from zoom_scribe.models import Recording
 
 
@@ -113,3 +113,8 @@ def test_download_in_dry_run_mode(monkeypatch, sample_recording):
     downloader.download([sample_recording], "/downloads", dry_run=True, overwrite=False)
 
     client.download_file.assert_not_called()
+
+
+@pytest.mark.parametrize("value", [".", "..", "...", "...."])
+def test_sanitize_replaces_dot_only_values(value):
+    assert _sanitize(value) == "_"
