@@ -1,0 +1,5 @@
+id: python-requests-method
+language: python
+rule:
+  kind: identifier
+  regex: "^(get|post|put|delete|head|options|patch)$"

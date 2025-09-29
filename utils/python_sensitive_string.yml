@@ -1,0 +1,5 @@
+id: python-sensitive-string
+language: python
+rule:
+  kind: string
+  regex: "(?i).*(password|passwd|secret|token|apikey|api_key|credential|session|auth).*"

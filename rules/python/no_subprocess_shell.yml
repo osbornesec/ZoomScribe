@@ -1,0 +1,9 @@
+id: python-no-subprocess-shell
+language: python
+message: "Avoid subprocess shell=True; use list arguments with shell=False instead."
+severity: error
+rule:
+  pattern: subprocess.$FUNC($$$ARGS, shell=True, $$$MORE)
+constraints:
+  FUNC:
+    matches: python-subprocess-call

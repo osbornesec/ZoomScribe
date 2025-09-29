@@ -1,0 +1,9 @@
+id: python-requests-no-verify-false
+language: python
+message: "Do not disable TLS verification on requests calls; remove verify=False or supply a CA bundle."
+severity: error
+rule:
+  pattern: requests.$METHOD($$$ARGS, verify=False, $$$MORE)
+constraints:
+  METHOD:
+    matches: python-requests-method

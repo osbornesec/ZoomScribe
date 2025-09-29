@@ -1,0 +1,197 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+
+language: en-US
+tone_instructions: "Direct, concise, security-first."
+early_access: false           # prefer stable behavior for strict gating
+enable_free_tier: false       # avoid feature limits in critical repos
+
+reviews:
+  # --- Review strictness & gating ---
+  profile: chill              # (schema-known) keep "chill" but tighten behavior below
+  request_changes_workflow: true
+  high_level_summary: true
+  high_level_summary_placeholder: "@coderabbitai summary"
+  high_level_summary_in_walkthrough: true
+  auto_title_placeholder: "@coderabbitai"
+  auto_title_instructions: "Short, imperative, 5–10 words; include scope if helpful."
+  review_status: true
+  commit_status: true
+  fail_commit_status: true    # 🔐 Block merges when serious issues are found
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  auto_apply_labels: true      # auto-label to enforce ownership/workflow
+  suggested_reviewers: true
+  auto_assign_reviewers: true
+  poem: false                  # keep signal focused
+
+  # --- Scope control / noise reduction ---
+  path_filters:
+    - "!**/*.lock"
+    - "!**/dist/**"
+    - "!**/build/**"
+    - "!**/*.min.*"
+    - "!**/vendor/**"
+  path_instructions:
+    # JS/TS/React
+    - path: "src/**/*.{ts,tsx,js}"
+      instructions: |
+        Review for security (XSS, SQLi, path traversal, SSRF), dependency risk, and sensitive data exposure.
+        Enforce modern TS/JS best practices (no 'var', prefer const, strict null checks, explicit return types).
+        Flag unsafe DOM usage, direct innerHTML, and unchecked user input.
+        Watch for performance issues (N+1 fetches, unnecessary re-renders, large bundles).
+        Ensure accessibility (aria, keyboard nav) and error boundaries.
+        Require thorough tests for new logic branches.
+    # Python
+    - path: "**/*.py"
+      instructions: |
+        Review for injection risks (SQL/OS), unsafe deserialization, secrets, and unbounded regex.
+        Require type hints for public functions, meaningful docstrings, and proper logging (no PII).
+        Enforce error handling (try/except granularity), resource cleanup (context managers), and timeouts in I/O.
+    # Go & Rust
+    - path: "**/*.{go,rs}"
+      instructions: |
+        Check race conditions, context/timeout propagation, and error wrapping.
+        Enforce allocation/escape analysis awareness; prefer zero-copy where safe; avoid unnecessary panics.
+    # Infrastructure as Code
+    - path: "infra/**/*.{tf,yml,yaml,json}"
+      instructions: |
+        Enforce least privilege, encryption at rest/in transit, and secure defaults.
+        Require policy/lint pass (checkov, regal) and explicit resource tagging.
+    # GitHub Actions / CI
+    - path: ".github/workflows/**/*.yml"
+      instructions: |
+        Require 'permissions:' to be least-privilege; avoid 'pull_request_target' unless strictly necessary.
+        Pin actions by SHA or exact version; forbid untrusted script execution.
+    # Docker & containers
+    - path: "**/*Dockerfile"
+      instructions: |
+        Use minimal base images; pin versions and digest; multi-stage builds; drop root; add HEALTHCHECK.
+    # SQL & migrations
+    - path: "**/*.sql"
+      instructions: |
+        Require parameterized queries, safe defaults, and backward-compatible migrations (zero-downtime).
+    # Tests
+    - path: "tests/**"
+      instructions: |
+        Ensure meaningful assertions, negative-path coverage, deterministic tests, and realistic edge cases.
+
+  abort_on_close: true
+  disable_cache: true         # prefer fresh analysis in strict mode
+
+  # --- Automation ---
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    ignore_title_keywords: ["WIP", "wip", "DNM", "do not merge"]
+    labels: []
+    drafts: true              # review drafts to catch issues early
+    base_branches: ["main", "master", "release/*"]
+
+  # --- Finishing touches to enforce quality at the PR level ---
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+
+  # --- Integrated tools (enabled broadly; they only run when relevant files exist) ---
+  tools:
+    ast-grep:
+      essential_rules: true
+      rule_dirs: ["rules"]     # add your custom rules here (see section below)
+      util_dirs: ["utils"]
+      packages: ["my-awesome-org/my-awesome-package"]  # example public ast-grep rules
+    shellcheck:       { enabled: true }
+    ruff:             { enabled: true }
+    markdownlint:     { enabled: true }
+    github-checks:    { enabled: true, timeout_ms: 90000 }
+    languagetool:
+      enabled: true
+      enabled_rules: []
+      disabled_rules: []
+      enabled_categories: []
+      disabled_categories: []
+      enabled_only: false
+      level: default
+    biome:            { enabled: true }
+    hadolint:         { enabled: true }
+    swiftlint:        { enabled: true, config_file: "" }
+    phpstan:          { enabled: true, level: default }
+    golangci-lint:    { enabled: true, config_file: "" }
+    yamllint:         { enabled: true }
+    gitleaks:         { enabled: true }
+    checkov:          { enabled: true }
+    detekt:           { enabled: true, config_file: "" }
+    eslint:           { enabled: true }
+    flake8:           { enabled: true }
+    rubocop:          { enabled: true }
+    buf:              { enabled: true }
+    regal:            { enabled: true }
+    actionlint:       { enabled: true }
+    pmd:              { enabled: true, config_file: "" }
+    phpmd:            { enabled: true }
+    phpcs:            { enabled: true }
+    cppcheck:         { enabled: true }
+    semgrep:          { enabled: true, config_file: "" }
+    circleci:         { enabled: true }
+    clippy:           { enabled: true }
+    sqlfluff:         { enabled: true }
+    prismaLint:       { enabled: true }
+    pylint:           { enabled: true }
+    oxc:              { enabled: true }
+    shopifyThemeCheck:{ enabled: true }
+    luacheck:         { enabled: true }
+    brakeman:         { enabled: true }
+    dotenvLint:       { enabled: true }
+    htmlhint:         { enabled: true }
+    checkmake:        { enabled: true }
+
+chat:
+  auto_reply: true
+  integrations:
+    jira:   { usage: auto }
+    linear: { usage: auto }
+
+# --- Knowledge base / data boundaries ---
+knowledge_base:
+  opt_out: true                   # 🔒 strict privacy (no learning from your repo)
+  web_search: { enabled: false }  # avoid external context in reviews by default
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "docs/engineering/secure-coding*.md"
+      - "docs/engineering/style-guides/**/*.md"
+  learnings:      { scope: auto }
+  issues:         { scope: auto }
+  jira:           { usage: auto, project_keys: [] }
+  linear:         { usage: auto, team_keys: [] }
+  pull_requests:  { scope: auto }
+
+# --- Opinionated code generation guardrails ---
+code_generation:
+  docstrings:
+    language: en-US
+    path_instructions:
+      - path: "src/**/*.{ts,tsx,js,py,go,rb,java,cs}"
+        instructions: |
+          - Include parameters, return values, exceptions/errors, and side effects.
+          - Note preconditions/invariants and thread/concurrency concerns if any.
+          - Avoid leaking secrets/PII; prefer generic examples.
+  unit_tests:
+    path_instructions:
+      - path: "src/**/*.{ts,tsx,js}"
+        instructions: |
+          - Use Jest; AAA structure; cover happy, error, and boundary cases.
+          - Avoid brittle snapshot tests unless snapshots are the most robust option.
+      - path: "**/*.py"
+        instructions: |
+          - Use pytest; parametrize boundary values; assert both success and failure paths.
+      - path: "**/*.go"
+        instructions: |
+          - Use table-driven tests; pass contexts with timeouts; guard racey code with -race locally.

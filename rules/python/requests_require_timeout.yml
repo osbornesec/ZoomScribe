@@ -1,0 +1,12 @@
+id: python-requests-require-timeout
+language: python
+message: "Add explicit timeout=... to requests calls to avoid hanging connections."
+severity: warning
+rule:
+  pattern: requests.$METHOD($$$ARGS)
+  not:
+    has:
+      pattern: timeout=
+constraints:
+  METHOD:
+    matches: python-requests-method
