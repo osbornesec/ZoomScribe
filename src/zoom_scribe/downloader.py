@@ -12,6 +12,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import IO, Any, Protocol, runtime_checkable
 
+from ._redact import redact_identifier, redact_uuid
 from .models import Recording, RecordingFile
 
 _SANITIZE_PATTERN = re.compile(r"[^A-Za-z0-9._@-]")
@@ -142,10 +143,10 @@ class RecordingDownloader:
         if temp_path.exists():
             temp_path.unlink()
 
-        payload = self._download_contents(recording_file)
         try:
             with open(temp_path, "wb") as temp_file:
-                temp_file.write(payload)
+                for chunk in self._download_contents(recording_file):
+                    temp_file.write(chunk)
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
             os.replace(temp_path, destination)
@@ -158,8 +159,8 @@ class RecordingDownloader:
         self._log_progress(event, destination, recording, recording_file)
         return destination
 
-    def _download_contents(self, recording_file: RecordingFile) -> bytes:
-        """Fetch the binary payload for ``recording_file`` using the backing client."""
+    def _download_contents(self, recording_file: RecordingFile) -> Iterable[bytes]:
+        """Yield the binary payload for ``recording_file`` in chunks."""
         download_file = getattr(self.client, "download_file", None)
         if callable(download_file):
             data = download_file(
@@ -168,12 +169,25 @@ class RecordingDownloader:
             )
         else:
             data = self.client.download_recording_file(recording_file)
-        if isinstance(data, bytes):
-            return data
+        yield from self._iterate_bytes(data)
+
+    def _iterate_bytes(self, data: Any) -> Iterable[bytes]:
+        """Normalise download payloads into a byte iterator."""
+        if isinstance(data, (bytes, bytearray, memoryview)):
+            yield bytes(data)
+            return
         if isinstance(data, _Readable):
-            return data.read()
+            chunk = data.read()
+            if not isinstance(chunk, (bytes, bytearray, memoryview)):
+                raise TypeError("Stream read must return bytes-like data")
+            yield bytes(chunk)
+            return
         if isinstance(data, Iterable):
-            return b"".join(data)
+            for chunk in data:
+                if not isinstance(chunk, (bytes, bytearray, memoryview)):
+                    raise TypeError("Download chunks must be bytes-like")
+                yield bytes(chunk)
+            return
         raise TypeError("Expected bytes or iterable of bytes from client download")
 
     def _log_progress(
@@ -187,11 +201,11 @@ class RecordingDownloader:
         extra = {
             "event": event,
             "path": str(destination),
-            "recording_uuid": recording.uuid,
-            "recording_file_id": recording_file.id,
+            "recording_uuid": redact_uuid(recording.uuid),
+            "recording_file_id": redact_identifier(recording_file.id),
             "file_type": recording_file.file_type,
-            "host_email": recording.host_email,
-            "meeting_topic": recording.meeting_topic,
+            "host_email": redact_identifier(recording.host_email),
+            "meeting_topic": redact_identifier(recording.meeting_topic),
         }
         if self._progress_isatty:
             pretty_event = event.replace("_", " ").title()

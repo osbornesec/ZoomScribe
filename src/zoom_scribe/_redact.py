@@ -3,8 +3,21 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import warnings
 
-_REDACTION_KEY = os.getenv("ZOOMSCRIBE_REDACTION_KEY")
+_NEW_ENV_NAME = "ZOOMSCRIBE_REDACTION_KEY"
+_LEGACY_ENV_NAME = "ZOOM_SCRIBE_REDACTION_KEY"
+
+_REDACTION_KEY = os.getenv(_NEW_ENV_NAME)
+if not _REDACTION_KEY:
+    _LEGACY_REDACTION_KEY = os.getenv(_LEGACY_ENV_NAME)
+    if _LEGACY_REDACTION_KEY:
+        warnings.warn(
+            f"{_LEGACY_ENV_NAME} is deprecated; use {_NEW_ENV_NAME} instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        _REDACTION_KEY = _LEGACY_REDACTION_KEY
 
 
 def _hash_str(value: str) -> str:
