@@ -10,7 +10,7 @@ class StubResponse:
     def __init__(self, payload, status_code=200, headers=None):
         """
         Initialize the stub HTTP response with a payload, status code, and headers.
-        
+
         Parameters:
             payload (Any): The body of the response; stored and returned by the response's `json()` and also converted to `text`.
             status_code (int): HTTP status code for the response (e.g., 200, 404, 429).
@@ -24,7 +24,7 @@ class StubResponse:
     def json(self):
         """
         Retrieve the stored JSON payload for this stubbed response.
-        
+
         Returns:
             The original payload object that was provided to the stub response.
         """
@@ -33,7 +33,7 @@ class StubResponse:
     def raise_for_status(self):
         """
         Raise an HTTPError when the response has an error status code.
-        
+
         Raises:
             requests.HTTPError: If the response's status_code is greater than or equal to 400.
         """
@@ -47,7 +47,7 @@ class DummySession:
     def __init__(self, responses):
         """
         Initialize the DummySession with a sequence of predefined responses and an empty call log.
-        
+
         Parameters:
             responses (iterable): An iterable of response objects to serve in FIFO order when request() is called. The iterable is copied into an internal list.
         """
@@ -57,16 +57,16 @@ class DummySession:
     def request(self, method, url, **kwargs):
         """
         Record an outgoing request and return the next predefined mock response.
-        
+
         Records the (method, url, kwargs) tuple in the session's call log, removes and returns the next response from the internal responses queue, and attaches the original request arguments to the returned response as `request_args`.
-        
+
         Parameters:
-        	method (str): HTTP method for the request (e.g., "GET", "POST").
-        	url (str): Request URL.
-        	**kwargs: Additional request arguments (query params, headers, json/body, etc.) which are recorded and forwarded to the returned response.
-        
+                method (str): HTTP method for the request (e.g., "GET", "POST").
+                url (str): Request URL.
+                **kwargs: Additional request arguments (query params, headers, json/body, etc.) which are recorded and forwarded to the returned response.
+
         Returns:
-        	response: The next predefined response object from the session's response queue with `request_args` set to (method, url, kwargs).
+                response: The next predefined response object from the session's response queue with `request_args` set to (method, url, kwargs).
         """
         self.calls.append((method, url, kwargs))
         response = self._responses.pop(0)
@@ -78,18 +78,19 @@ class DummySession:
 def client_factory(monkeypatch):
     """
     Provide a factory for tests that creates a ZoomAPIClient wired to a DummySession.
-    
+
     The returned factory accepts a list of prebuilt response objects and returns a tuple of
     (ZoomAPIClient, DummySession) suitable for unit tests.
-    
+
     Parameters:
         monkeypatch: pytest's monkeypatch fixture (passed through by the test harness).
-    
+
     Returns:
         factory (callable): A function that takes `responses` (a list of mock response objects)
         and returns a tuple `(client, session)` where `client` is a ZoomAPIClient configured
         for testing and `session` is the DummySession that will serve the provided responses.
     """
+
     def _factory(responses):
         session = DummySession(responses)
         client = ZoomAPIClient(
@@ -109,10 +110,10 @@ def client_factory(monkeypatch):
 def make_meeting(uuid):
     """
     Create a deterministic meeting payload dictionary used by tests.
-    
+
     Parameters:
         uuid (str): Meeting UUID to inject into the payload and file identifiers.
-    
+
     Returns:
         dict: A meeting dictionary with keys:
             - "uuid": the provided UUID.
@@ -160,6 +161,23 @@ def test_list_recordings_returns_recording_models(client_factory):
     assert params["to"] == "2025-09-30"
 
 
+def test_list_recordings_normalizes_naive_datetimes(client_factory):
+    responses = [
+        StubResponse({"meetings": [make_meeting("uuid-1")], "next_page_token": ""}),
+    ]
+    client, session = client_factory(responses)
+
+    recordings = client.list_recordings(
+        start=datetime(2025, 9, 1),
+        end=datetime(2025, 9, 30),
+    )
+
+    assert len(recordings) == 1
+    params = session.calls[0][2]["params"]
+    assert params["from"] == "2025-09-01"
+    assert params["to"] == "2025-09-30"
+
+
 def test_list_recordings_paginates_until_next_page_empty(client_factory):
     responses = [
         StubResponse({"meetings": [make_meeting("uuid-1")], "next_page_token": "abc"}),
@@ -188,7 +206,7 @@ def test_list_recordings_retries_on_rate_limit(monkeypatch, client_factory):
     def fake_sleep(seconds):
         """
         Record a requested sleep duration by appending it to the module-level `sleep_calls` list.
-        
+
         Parameters:
             seconds (float): Number of seconds that would have been slept; this value is appended to `sleep_calls`.
         """
@@ -250,6 +268,22 @@ def test_list_recordings_meeting_id_fallback_to_direct_lookup(client_factory):
 
     assert [rec.uuid for rec in recordings] == ["123456"]
     assert session.calls[1][1].endswith("meetings/123456/recordings")
+
+
+def test_list_recordings_meeting_id_accepts_naive_datetimes(client_factory):
+    responses = [
+        StubResponse({"meetings": [{"uuid": "uuid-5"}]}),
+        StubResponse(make_meeting("uuid-5")),
+    ]
+    client, _ = client_factory(responses)
+
+    recordings = client.list_recordings(
+        start=datetime(2025, 9, 1),
+        end=datetime(2025, 9, 30),
+        meeting_id="meeting-uuid",
+    )
+
+    assert [rec.uuid for rec in recordings] == ["uuid-5"]
 
 
 def test_list_recordings_meeting_id_honors_host_filter(client_factory):
@@ -342,9 +376,7 @@ def test_download_file_encodes_access_token():
         access_token="token-123",
     )
 
-    client.download_file(
-        url="https://zoom.us/download/file", access_token="abc+/="
-    )
+    client.download_file(url="https://zoom.us/download/file", access_token="abc+/=")
 
     url, _, _ = session.calls[0]
     assert "access_token=abc%2B%2F%3D" in url

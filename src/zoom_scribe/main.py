@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import click
 
+from ._datetime import ensure_utc
 from .client import ZoomAPIClient
 from .downloader import RecordingDownloader
 
@@ -12,7 +13,7 @@ from .downloader import RecordingDownloader
 def create_client() -> ZoomAPIClient:
     """
     Instantiate a ZoomAPIClient configured from environment variables.
-    
+
     Returns:
         ZoomAPIClient: A client configured using credentials and settings read from the environment.
     """
@@ -24,10 +25,10 @@ def create_downloader(
 ) -> RecordingDownloader:
     """
     Create a RecordingDownloader configured with the given ZoomAPIClient and optional logger.
-    
+
     Parameters:
         logger (logging.Logger | None): Optional logger instance that the downloader will use for logging.
-    
+
     Returns:
         RecordingDownloader: A downloader instance bound to the provided client and logger.
     """
@@ -76,7 +77,7 @@ def cli(
 ) -> None:
     """
     Run the CLI workflow to fetch Zoom cloud recordings for a date range and save them to disk.
-    
+
     Parameters:
         from_date (datetime | None): Start of the date range (UTC). If None, defaults to 30 days before now.
         to_date (datetime | None): End of the date range (UTC). If None, defaults to now.
@@ -85,7 +86,7 @@ def cli(
         meeting_id (str | None): If set, filter recordings to this meeting ID or UUID.
         dry_run (bool): If True, list matching recordings without downloading them.
         overwrite (bool): If True, overwrite existing files when downloading.
-    
+
     Description:
         Configures logging, creates a Zoom API client and a RecordingDownloader, queries recordings
         within the specified UTC date range using the provided filters, and either performs downloads
@@ -95,8 +96,11 @@ def cli(
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     logger = logging.getLogger("zoom_scribe.cli")
 
-    start = from_date or (datetime.now(UTC) - timedelta(days=30))
-    end = to_date or datetime.now(UTC)
+    from_date_utc = ensure_utc(from_date) if from_date else None
+    to_date_utc = ensure_utc(to_date) if to_date else None
+
+    start = from_date_utc or (datetime.now(UTC) - timedelta(days=30))
+    end = to_date_utc or datetime.now(UTC)
 
     logger.info(
         "cli.invoke",
