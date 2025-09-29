@@ -2,7 +2,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from zoom_scribe.models import Recording, RecordingFile
+from zoom_scribe.models import (
+    ModelValidationError,
+    Recording,
+    RecordingFile,
+    RecordingPage,
+)
 
 
 @pytest.fixture
@@ -43,3 +48,38 @@ def test_recording_from_api_creates_recording_files(recording_file_payload):
     assert recording.start_time == datetime(2025, 9, 28, 10, 0, tzinfo=UTC)
     assert len(recording.recording_files) == 1
     assert recording.recording_files[0].id == "file123"
+
+
+def test_recording_from_api_requires_uuid(recording_file_payload):
+    payload = {
+        "topic": "Team Sync",
+        "host_email": "host@example.com",
+        "start_time": "2025-09-28T10:00:00Z",
+        "recording_files": [recording_file_payload],
+    }
+
+    with pytest.raises(ModelValidationError):
+        Recording.from_api(payload)
+
+
+def test_recording_page_from_api_handles_pagination(recording_file_payload):
+    payload = {
+        "meetings": [
+            {
+                "uuid": "meeting-uuid",
+                "topic": "Team Sync",
+                "host_email": "host@example.com",
+                "start_time": "2025-09-28T10:00:00Z",
+                "recording_files": [recording_file_payload],
+            }
+        ],
+        "next_page_token": "abc",
+        "total_records": 10,
+    }
+
+    page = RecordingPage.from_api(payload)
+
+    assert page.has_next_page() is True
+    assert page.total_records == 10
+    assert len(page.recordings) == 1
+    assert page.recordings[0].uuid == "meeting-uuid"

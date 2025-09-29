@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from zoom_scribe.downloader import RecordingDownloader, _sanitize
+from zoom_scribe.downloader import DownloadError, RecordingDownloader, _sanitize
 from zoom_scribe.models import Recording
 
 
@@ -98,6 +98,27 @@ def test_download_in_dry_run_mode(tmp_path, sample_recording):
     recording_file = sample_recording.recording_files[0]
     destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
     assert not destination.exists()
+
+
+def test_download_cleans_temp_on_failure(tmp_path, monkeypatch, sample_recording):
+    client = Mock()
+    client.download_file.return_value = b"binary-data"
+    downloader = RecordingDownloader(client, max_workers=1)
+
+    recording_file = sample_recording.recording_files[0]
+    destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    def fail_replace(src, dst):
+        raise OSError("boom")
+
+    monkeypatch.setattr("zoom_scribe.downloader.os.replace", fail_replace)
+
+    with pytest.raises(DownloadError):
+        downloader.download([sample_recording], tmp_path, dry_run=False, overwrite=False)
+
+    temp_path = destination.with_suffix(destination.suffix + ".part")
+    assert not temp_path.exists()
 
 
 @pytest.mark.parametrize("value", [".", "..", "...", "...."])

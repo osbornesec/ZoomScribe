@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import Mock
 
 from click.testing import CliRunner
@@ -74,3 +75,51 @@ def test_cli_overwrite_option(monkeypatch):
 
     assert result.exit_code == 0
     assert downloader.download.call_args[1]["overwrite"] is True
+
+
+def test_cli_configures_logging(monkeypatch):
+    captured: dict[str, str] = {}
+
+    def fake_configure(level: str, fmt: str) -> logging.Logger:
+        captured["level"] = level
+        captured["format"] = fmt
+        return logging.getLogger("zoom_scribe.test")
+
+    client = Mock()
+    client.list_recordings.return_value = []
+    downloader = Mock()
+
+    monkeypatch.setattr("zoom_scribe.main.configure_logging", fake_configure)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda: client)
+    monkeypatch.setattr(
+        "zoom_scribe.main.create_downloader",
+        lambda client, logger=None: downloader,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["--dry-run", "--log-level", "DEBUG", "--log-format", "json"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["level"].lower() == "debug"
+    assert captured["format"].lower() == "json"
+
+
+def test_cli_rejects_file_target_dir(tmp_path, monkeypatch):
+    file_path = tmp_path / "existing.txt"
+    file_path.write_text("content", encoding="utf-8")
+
+    monkeypatch.setattr("zoom_scribe.main.configure_logging", lambda *args, **kwargs: logging.getLogger("zoom_scribe.test"))
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda: Mock())
+    monkeypatch.setattr(
+        "zoom_scribe.main.create_downloader",
+        lambda client, logger=None: Mock(),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--target-dir", str(file_path)])
+
+    assert result.exit_code != 0
+    assert "Target path exists" in result.output
