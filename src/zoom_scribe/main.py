@@ -11,27 +11,14 @@ from .downloader import RecordingDownloader
 
 
 def create_client() -> ZoomAPIClient:
-    """
-    Instantiate a ZoomAPIClient configured from environment variables.
-
-    Returns:
-        ZoomAPIClient: A client configured using credentials and settings read from the environment.
-    """
+    """Instantiate a ZoomAPIClient configured from the environment."""
     return ZoomAPIClient.from_env()
 
 
 def create_downloader(
     client: ZoomAPIClient, logger: logging.Logger | None = None
 ) -> RecordingDownloader:
-    """
-    Create a RecordingDownloader configured with the given ZoomAPIClient and optional logger.
-
-    Parameters:
-        logger (logging.Logger | None): Optional logger instance that the downloader will use for logging.
-
-    Returns:
-        RecordingDownloader: A downloader instance bound to the provided client and logger.
-    """
+    """Build a RecordingDownloader bound to the provided client and logger."""
     return RecordingDownloader(client, logger=logger)
 
 
@@ -75,32 +62,21 @@ def cli(
     dry_run: bool,
     overwrite: bool,
 ) -> None:
-    """
-    Run the CLI workflow to fetch Zoom cloud recordings for a date range and save them to disk.
-
-    Parameters:
-        from_date (datetime | None): Start of the date range (UTC). If None, defaults to 30 days before now.
-        to_date (datetime | None): End of the date range (UTC). If None, defaults to now.
-        target_dir (str): Filesystem directory where recordings will be saved.
-        host_email (str | None): If set, filter recordings to meetings hosted by this email.
-        meeting_id (str | None): If set, filter recordings to this meeting ID or UUID.
-        dry_run (bool): If True, list matching recordings without downloading them.
-        overwrite (bool): If True, overwrite existing files when downloading.
-
-    Description:
-        Configures logging, creates a Zoom API client and a RecordingDownloader, queries recordings
-        within the specified UTC date range using the provided filters, and either performs downloads
-        to `target_dir` or reports what would be processed when `dry_run` is True. Outputs a summary
-        message via the CLI on completion.
-    """
+    """Run the CLI workflow to fetch and optionally download Zoom recordings."""
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     logger = logging.getLogger("zoom_scribe.cli")
 
     from_date_utc = ensure_utc(from_date) if from_date else None
     to_date_utc = ensure_utc(to_date) if to_date else None
 
-    start = from_date_utc or (datetime.now(UTC) - timedelta(days=30))
     end = to_date_utc or datetime.now(UTC)
+    start = from_date_utc or (end - timedelta(days=30))
+
+    if start > end:
+        raise click.BadParameter(
+            "Start date must be on or before end date.",
+            param_hint="--from/--to",
+        )
 
     logger.info(
         "cli.invoke",

@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from typing import IO, Any, TypedDict
 from urllib.parse import quote, urljoin
 
 import requests
@@ -13,50 +14,43 @@ try:
 except ImportError:  # pragma: no cover
 
     def find_dotenv(
-        dotenv_path: str | None = None,
+        filename: str = "",
         raise_error_if_not_found: bool = False,
-    ):
-        """
-        Return the provided dotenv path or an empty string.
+        usecwd: bool = False,
+    ) -> str:
+        """Return the provided dotenv filename or an empty string."""
+        _ = raise_error_if_not_found  # pragma: no cover - unused in stub
+        _ = usecwd  # pragma: no cover - unused in stub
+        return filename or ""
 
-        Parameters:
-            dotenv_path (str | None): Path to a .env file. If None, an empty string is returned.
-            raise_error_if_not_found (bool): Ignored by this implementation; kept for API compatibility.
-
-        Returns:
-            str: The given dotenv path, or an empty string when no path was provided.
-        """
-        return dotenv_path or ""
-
-    def load_dotenv(*args, **kwargs):
-        """
-        No-op placeholder for loading a .env file when python-dotenv is not available.
-
-        All positional and keyword arguments are ignored. This function always returns False to indicate that no .env file was loaded.
-        """
+    def load_dotenv(
+        dotenv_path: str | os.PathLike[str] | None = None,
+        stream: IO[str] | None = None,
+        verbose: bool = False,
+        override: bool = False,
+        interpolate: bool = True,
+        encoding: str | None = None,
+    ) -> bool:
+        """Stub load_dotenv that always reports no file was loaded."""
+        _ = (dotenv_path, stream, verbose, override, interpolate, encoding)
         return False
 
 
 from ._datetime import ensure_utc
 from .models import Recording
 
+
+class OAuthCredentials(TypedDict):
+    account_id: str
+    client_id: str
+    client_secret: str
+
+
 _LOGGER = logging.getLogger(__name__)
 
 
-def load_env_credentials(dotenv_path: str | None = None) -> dict[str, str]:
-    """
-    Load Zoom OAuth credentials from a .env file or the environment.
-
-    If a dotenv path is provided and found, the file is loaded (without overriding existing environment variables).
-    Parameters:
-        dotenv_path (str | None): Optional path or pattern for a .env file to load.
-
-    Returns:
-        dict[str, str]: Mapping with keys `account_id`, `client_id`, and `client_secret` containing the corresponding environment values.
-
-    Raises:
-        RuntimeError: If any of ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, or ZOOM_CLIENT_SECRET are missing from the environment.
-    """
+def load_env_credentials(dotenv_path: str | None = None) -> OAuthCredentials:
+    """Load Zoom OAuth credentials from a .env file or the environment."""
     if dotenv_path:
         resolved_path = find_dotenv(dotenv_path, raise_error_if_not_found=False)
     else:
@@ -78,6 +72,9 @@ def load_env_credentials(dotenv_path: str | None = None) -> dict[str, str]:
     if missing:
         missing_list = ", ".join(missing)
         raise RuntimeError("Missing Zoom credentials in environment: " + missing_list)
+    assert account_id is not None
+    assert client_id is not None
+    assert client_secret is not None
     return {
         "account_id": account_id,
         "client_id": client_id,
@@ -134,21 +131,7 @@ class ZoomAPIClient:
         backoff_factor: float = 0.5,
         logger: logging.Logger | None = None,
     ) -> None:
-        """
-        Initialize the ZoomAPIClient with credentials, HTTP settings, and retry configuration.
-
-        Parameters:
-            account_id (str | None): Zoom account ID used for the account_credentials grant.
-            client_id (str | None): OAuth client ID for token requests.
-            client_secret (str | None): OAuth client secret for token requests.
-            base_url (str): Base API URL; trailing slashes are normalized.
-            token_url (str): OAuth token endpoint URL.
-            session (requests.Session | None): Optional requests.Session to use for HTTP calls; a new Session is created if omitted.
-            access_token (str | None): Optional pre-obtained OAuth access token to seed the client.
-            max_retries (int): Maximum number of retries for rate-limited requests; negative values are clamped to 0.
-            backoff_factor (float): Base backoff multiplier for retry delays; negative values are clamped to 0.0.
-            logger (logging.Logger | None): Logger to use; a module-level default logger is used if omitted.
-        """
+        """Initialize the client with credentials, HTTP settings, and logging."""
         self.account_id = account_id
         self.client_id = client_id
         self.client_secret = client_secret
@@ -162,20 +145,15 @@ class ZoomAPIClient:
         self.logger = logger or _LOGGER
 
     @classmethod
-    def from_env(cls, *, dotenv_path: str | None = None, **overrides) -> ZoomAPIClient:
-        """
-        Create a ZoomAPIClient using credentials loaded from the environment or a .env file, with optional overrides applied.
-
-        Parameters:
-            dotenv_path (str | None): Path to a .env file to load before reading environment variables. If `None`, the environment is used as-is.
-            overrides: Keyword arguments that override or extend the loaded credentials (for example `account_id`, `client_id`, `client_secret`, or other constructor parameters).
-
-        Returns:
-            ZoomAPIClient: An instance configured with the merged environment credentials and overrides.
-        """
-        credentials = load_env_credentials(dotenv_path)
-        credentials.update(overrides)
-        return cls(**credentials)
+    def from_env(
+        cls,
+        *,
+        dotenv_path: str | None = None,
+        **overrides: Any,
+    ) -> ZoomAPIClient:
+        """Create a client using environment credentials with optional overrides."""
+        env_credentials = load_env_credentials(dotenv_path)
+        return cls(**env_credentials, **overrides)
 
     def list_recordings(
         self,
@@ -186,21 +164,7 @@ class ZoomAPIClient:
         meeting_id: str | None = None,
         page_size: int = 100,
     ) -> list[Recording]:
-        """
-        Retrieve recordings for the authenticated account within a date range.
-
-        If `meeting_id` is provided, results are limited to that meeting; otherwise recordings across the account are returned. Results can be restricted to a specific host and the `page_size` controls page size when listing user recordings.
-
-        Parameters:
-            start (datetime): Inclusive start of the date range to search.
-            end (datetime): Inclusive end of the date range to search.
-            host_email (str | None): Optional host email to filter recordings by owner.
-            meeting_id (str | None): Optional meeting identifier to limit results to a single meeting.
-            page_size (int): Maximum number of items per page when listing user recordings.
-
-        Returns:
-            list[Recording]: Recordings that match the supplied criteria.
-        """
+        """Return recordings for the account within the provided date range."""
         start_utc = ensure_utc(start)
         end_utc = ensure_utc(end)
 
@@ -241,18 +205,7 @@ class ZoomAPIClient:
         host_email: str | None,
         page_size: int,
     ) -> list[Recording]:
-        """
-        Retrieve recordings for a user account within a date range.
-
-        Parameters:
-            start (datetime): Start date for the query (used as the "from" date).
-            end (datetime): End date for the query (used as the "to" date).
-            host_email (str | None): If provided, fetch recordings for this user's email; otherwise fetch for the authenticated account.
-            page_size (int): Number of records to request per page from the API.
-
-        Returns:
-            list[Recording]: List of Recording objects collected from all pages within the specified date range.
-        """
+        """List user recordings within the supplied date range."""
         params: dict[str, str] = {
             "from": start.strftime("%Y-%m-%d"),
             "to": end.strftime("%Y-%m-%d"),
@@ -289,19 +242,9 @@ class ZoomAPIClient:
         end: datetime,
         host_email: str | None,
     ) -> list[Recording]:
-        """
-        Collect recordings for a specific meeting ID within a time window, optionally filtered by host email.
-
-        Parameters:
-            meeting_id (str): Meeting identifier to query for instances and recordings.
-            start (datetime): Inclusive lower bound for recording start time.
-            end (datetime): Inclusive upper bound for recording start time.
-            host_email (str | None): If provided, only include recordings whose host email matches (case-insensitive).
-
-        Returns:
-            list[Recording]: Recording objects whose start_time falls between `start` and `end` and, if `host_email` is set, whose host matches.
-        """
-        response = self._request("GET", f"past_meetings/{meeting_id}/instances")
+        """Collect meeting recordings within the window and optional host filter."""
+        encoded_meeting_id = _encode_uuid(meeting_id)
+        response = self._request("GET", f"past_meetings/{encoded_meeting_id}/instances")
         payload = response.json()
         meetings = payload.get("meetings") or []
 
@@ -344,20 +287,7 @@ class ZoomAPIClient:
         return recordings
 
     def _fetch_meeting_recording(self, uuid: str) -> dict:
-        """
-        Retrieve the recordings payload for a specific meeting UUID.
-
-        When Zoom returns an instance UUID, it must be inserted into the URL path
-        with the correct encoding so that both single- and double-encoded values
-        succeed.
-
-        Parameters:
-            uuid (str): Meeting or meeting-instance UUID to fetch recordings for.
-
-        Returns:
-            dict: JSON payload from the Zoom recordings endpoint including
-                `download_access_token` when provided.
-        """
+        """Fetch the recordings payload for a specific meeting UUID."""
         path = f"meetings/{_encode_uuid(uuid)}/recordings"
         response = self._request(
             "GET",
@@ -367,16 +297,7 @@ class ZoomAPIClient:
         return response.json()
 
     def download_file(self, *, url: str, access_token: str | None = None) -> bytes:
-        """
-        Download a Zoom-hosted file, optionally appending a download access token to the URL.
-
-        Parameters:
-            url (str): The file URL to download.
-            access_token (str | None): Optional download access token to append as a query parameter.
-
-        Returns:
-            bytes: The raw response content of the downloaded file.
-        """
+        """Download a file, appending the access token when provided."""
         self._ensure_access_token()
         request_url = url
         if access_token:
@@ -389,29 +310,14 @@ class ZoomAPIClient:
         return response.content
 
     def download_recording_file(self, recording_file) -> bytes:
-        """
-        Download the bytes of a recording represented by a RecordingFile-like object.
-
-        Parameters:
-            recording_file: An object exposing `download_url` (str) and `download_access_token` (str|None); the URL and optional token used to fetch the file.
-
-        Returns:
-            bytes: The raw bytes of the downloaded recording.
-        """
+        """Download bytes for a RecordingFile-like object."""
         access_token = recording_file.download_access_token
         return self.download_file(
             url=recording_file.download_url, access_token=access_token
         )
 
     def _headers(self) -> dict[str, str]:
-        """
-        Build HTTP headers including an Authorization bearer token for API requests.
-
-        Ensures a valid access token is present and returns a mapping of headers required for JSON API requests.
-
-        Returns:
-            dict[str, str]: Headers containing an `Authorization: Bearer <token>` entry and `Content-Type`/`Accept` set to `application/json`.
-        """
+        """Return standard JSON headers including the bearer token."""
         self._ensure_access_token()
         return {
             "Authorization": f"Bearer {self._access_token}",
@@ -420,15 +326,7 @@ class ZoomAPIClient:
         }
 
     def _ensure_access_token(self) -> None:
-        """
-        Ensure a valid OAuth access token is available for API requests.
-
-        If a cached token exists and is not expired (or has no expiry), this is a no-op. Otherwise the client requests a new token from `self.token_url` using the account credentials grant and stores `self._access_token` and `self._token_expiry` (set to current time plus `expires_in` when present, otherwise `None`).
-
-        Raises:
-            RuntimeError: If OAuth credentials are missing and no cached access token exists.
-            requests.HTTPError: If the token request returns a non-successful HTTP status.
-        """
+        """Ensure a valid OAuth access token is cached or fetch a new one."""
         if (
             self._access_token
             and self._token_expiry
@@ -447,6 +345,9 @@ class ZoomAPIClient:
         self.logger.debug(
             "zoom.auth.request_token", extra={"token_url": self.token_url}
         )
+        assert self.client_id is not None
+        assert self.client_secret is not None
+        assert self.account_id is not None
         response = self.session.post(
             self.token_url,
             data={"grant_type": "account_credentials", "account_id": self.account_id},
@@ -470,17 +371,7 @@ class ZoomAPIClient:
         params: dict[str, str] | None = None,
         json: dict[str, str] | None = None,
     ):
-        """
-        Send an HTTP request to the Zoom API and automatically retry on 429 (rate-limit) responses.
-
-        Retries use the client's retry configuration and backoff calculation when the server returns 429; other HTTP errors are raised.
-
-        Returns:
-            requests.Response: The successful HTTP response.
-
-        Raises:
-            requests.HTTPError: If the final response has an HTTP error status.
-        """
+        """Send an HTTP request and retry automatically on HTTP 429 responses."""
         self._ensure_access_token()
         url = urljoin(self.base_url, path)
         attempt = 0
@@ -509,18 +400,7 @@ class ZoomAPIClient:
             return response
 
     def _compute_backoff(self, attempt: int, response) -> float:
-        """
-        Compute the delay in seconds to wait before the next retry after receiving an HTTP 429 response.
-
-        Uses the `Retry-After` response header if present and parseable as a float; otherwise computes exponential backoff as `backoff_factor * (2**attempt)`.
-
-        Parameters:
-            attempt (int): The retry attempt index (0 for the first retry).
-            response: The HTTP response object containing headers (e.g., `requests.Response`).
-
-        Returns:
-            float: Delay in seconds to wait before retrying.
-        """
+        """Compute the retry delay using Retry-After or exponential backoff."""
         retry_after = response.headers.get("Retry-After")
         if retry_after:
             try:

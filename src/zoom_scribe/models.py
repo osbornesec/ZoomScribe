@@ -31,7 +31,7 @@ class RecordingFile:
     download_access_token: str | None = None
 
     @classmethod
-    def from_api(cls, payload: Mapping[str, Any]) -> "RecordingFile":
+    def from_api(cls, payload: Mapping[str, Any]) -> RecordingFile:
         """Build a RecordingFile from the raw Zoom API payload."""
         file_extension = (
             payload.get("file_extension") or payload.get("file_type", "").lower()
@@ -56,14 +56,18 @@ class Recording:
     recording_files: list[RecordingFile] = field(default_factory=list)
 
     @classmethod
-    def from_api(cls, payload: Mapping[str, Any]) -> "Recording":
+    def from_api(cls, payload: Mapping[str, Any]) -> Recording:
         """Hydrate a Recording from the JSON object returned by Zoom."""
         files_payload = payload.get("recording_files") or []
         files = [RecordingFile.from_api(file_payload) for file_payload in files_payload]
+        topic_value = payload.get("topic") or payload.get("meeting_topic")
+        meeting_topic = str(topic_value) if topic_value is not None else ""
+        host_email_value = payload.get("host_email")
+        host_email = str(host_email_value) if host_email_value is not None else ""
         return cls(
             uuid=payload["uuid"],
-            meeting_topic=payload.get("topic") or payload.get("meeting_topic", ""),
-            host_email=payload.get("host_email", ""),
+            meeting_topic=meeting_topic,
+            host_email=host_email,
             start_time=_parse_datetime(payload["start_time"]),
             recording_files=files,
         )
