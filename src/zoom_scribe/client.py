@@ -346,7 +346,7 @@ class ZoomAPIClient:
         # Enforce Zoom host allowlist to reduce SSRF risk.
         try:
             from urllib.parse import urlparse  # local import to avoid top-level churn
-        except Exception:  # pragma: no cover
+        except ImportError:  # pragma: no cover
             urlparse = None
         if urlparse is not None:
             host = (urlparse(request_url).hostname or "").lower()
