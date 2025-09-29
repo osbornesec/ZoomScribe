@@ -1,3 +1,5 @@
+"""Typed data models and validation helpers for Zoom API responses."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -30,7 +32,6 @@ def _parse_datetime(value: str) -> datetime:
         >>> _parse_datetime("2025-03-01T12:30:00Z")
         datetime.datetime(2025, 3, 1, 12, 30, tzinfo=datetime.UTC)
     """
-
     if not value:
         raise ModelValidationError("Expected an ISO 8601 timestamp")
     normalised = value[:-1] + "+00:00" if value.endswith("Z") else value
@@ -45,7 +46,6 @@ def _parse_datetime(value: str) -> datetime:
 
 def _normalise_optional_str(value: Any) -> str | None:
     """Return a stripped string for ``value`` or ``None`` when empty."""
-
     if value is None:
         return None
     text = str(value).strip()
@@ -54,7 +54,6 @@ def _normalise_optional_str(value: Any) -> str | None:
 
 def _ensure_required(payload: JsonMapping, key: str) -> Any:
     """Retrieve ``key`` from ``payload`` and raise if missing or empty."""
-
     if key not in payload or payload[key] in (None, ""):
         raise ModelValidationError(f"Missing required field '{key}' in payload")
     return payload[key]
@@ -83,6 +82,7 @@ class RecordingFile:
     file_size: int | None = None
 
     def __post_init__(self) -> None:
+        """Validate required recording file attributes."""
         if not self.id:
             raise ModelValidationError("RecordingFile.id must be populated")
         if not self.file_type:
@@ -90,7 +90,7 @@ class RecordingFile:
         if not self.download_url:
             raise ModelValidationError("RecordingFile.download_url must be populated")
 
-    def __str__(self) -> str:  # pragma: no cover - trivial representation
+    def __str__(self) -> str:  # pragma: no cover - trivial representation  # noqa: D105
         return f"RecordingFile(id={self.id}, type={self.file_type})"
 
     @classmethod
@@ -106,11 +106,8 @@ class RecordingFile:
         Raises:
             ModelValidationError: If required fields are missing.
         """
-
         file_extension = payload.get("file_extension") or payload.get("file_type") or ""
-        download_access_token = _normalise_optional_str(
-            payload.get("download_access_token")
-        )
+        download_access_token = _normalise_optional_str(payload.get("download_access_token"))
         status = _normalise_optional_str(payload.get("status"))
         file_size_raw = payload.get("file_size")
         file_size = int(file_size_raw) if isinstance(file_size_raw, (int, float)) else None
@@ -147,12 +144,13 @@ class Recording:
     recording_files: tuple[RecordingFile, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
+        """Validate required recording metadata."""
         if not self.uuid:
             raise ModelValidationError("Recording.uuid must be populated")
         if self.start_time.tzinfo is None:
             raise ModelValidationError("Recording.start_time must be timezone aware")
 
-    def __str__(self) -> str:  # pragma: no cover - trivial representation
+    def __str__(self) -> str:  # pragma: no cover - trivial representation  # noqa: D105
         return f"Recording(uuid={self.uuid}, files={len(self.recording_files)})"
 
     @classmethod
@@ -168,7 +166,6 @@ class Recording:
         Raises:
             ModelValidationError: If required fields are missing or invalid.
         """
-
         files_payload = payload.get("recording_files") or []
         files = tuple(RecordingFile.from_api(file_payload) for file_payload in files_payload)
         topic_value = _normalise_optional_str(payload.get("topic"))
@@ -191,13 +188,11 @@ class Recording:
         Returns:
             Tuple containing each ``RecordingFile`` associated with the meeting.
         """
-
         return self.recording_files
 
     @property
     def files(self) -> tuple[RecordingFile, ...]:
         """Alias for :attr:`recording_files` to aid readability."""
-
         return self.recording_files
 
 
@@ -219,12 +214,13 @@ class RecordingPage:
         Returns:
             Normalised ``RecordingPage`` encapsulating recordings and pagination token.
         """
-
         meetings_payload = payload.get("meetings") or []
         recordings = tuple(Recording.from_api(meeting) for meeting in meetings_payload)
         next_page_token = _normalise_optional_str(payload.get("next_page_token"))
         total_records_raw = payload.get("total_records")
-        total_records = int(total_records_raw) if isinstance(total_records_raw, (int, float)) else None
+        total_records = (
+            int(total_records_raw) if isinstance(total_records_raw, (int, float)) else None
+        )
         return cls(
             recordings=recordings,
             next_page_token=next_page_token,
@@ -233,13 +229,12 @@ class RecordingPage:
 
     def has_next_page(self) -> bool:
         """Return ``True`` when an additional page token is present."""
-
         return bool(self.next_page_token)
 
-    def __iter__(self) -> Iterable[Recording]:  # pragma: no cover - simple delegation
+    def __iter__(self) -> Iterable[Recording]:  # pragma: no cover - simple delegation  # noqa: D105
         return iter(self.recordings)
 
-    def __len__(self) -> int:  # pragma: no cover - simple delegation
+    def __len__(self) -> int:  # pragma: no cover - simple delegation  # noqa: D105
         return len(self.recordings)
 
 

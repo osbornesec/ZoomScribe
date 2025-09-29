@@ -25,7 +25,7 @@ def test_cli_invokes_dry_run(monkeypatch):
     assert result.exit_code == 0
     client.list_recordings.assert_called_once()
     downloader.download.assert_called_once()
-    args, kwargs = downloader.download.call_args
+    _args, kwargs = downloader.download.call_args
     assert kwargs["dry_run"] is True
     assert kwargs["overwrite"] is False
 
@@ -111,7 +111,10 @@ def test_cli_rejects_file_target_dir(tmp_path, monkeypatch):
     file_path = tmp_path / "existing.txt"
     file_path.write_text("content", encoding="utf-8")
 
-    monkeypatch.setattr("zoom_scribe.main.configure_logging", lambda *args, **kwargs: logging.getLogger("zoom_scribe.test"))
+    def fake_logging(*args, **kwargs):
+        return logging.getLogger("zoom_scribe.test")
+
+    monkeypatch.setattr("zoom_scribe.main.configure_logging", fake_logging)
     monkeypatch.setattr("zoom_scribe.main.create_client", lambda: Mock())
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",

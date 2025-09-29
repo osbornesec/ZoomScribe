@@ -317,7 +317,7 @@ def test_download_file_allows_timeout_override(client_factory):
         timeout=5.0,
     )
 
-    method, url, kwargs = session.calls[0]
+    method, _url, kwargs = session.calls[0]
     assert method == "GET"
     assert kwargs["timeout"] == 5.0
 

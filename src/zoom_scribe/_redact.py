@@ -4,18 +4,17 @@ import hashlib
 import hmac
 import os
 
-
-_REDACTION_KEY = os.getenv("ZOOMScribe_REDACTION_KEY")
+_REDACTION_KEY = os.getenv("ZOOMSCRIBE_REDACTION_KEY")
 
 
 def _hash_str(value: str) -> str:
     """Return a deterministic hash using HMAC when a secret key is provided."""
     data = value.encode("utf-8")
     if _REDACTION_KEY:
-        digest = hmac.new(_REDACTION_KEY.encode("utf-8"), data, hashlib.sha256)
+        digest_hex = hmac.new(_REDACTION_KEY.encode("utf-8"), data, hashlib.sha256).hexdigest()
     else:
-        digest = hashlib.sha256(data)
-    return f"sha256:{digest.hexdigest()[:32]}"
+        digest_hex = hashlib.sha256(data).hexdigest()
+    return f"sha256:{digest_hex[:32]}"
 
 
 def redact_identifier(value: str | None) -> str | None:

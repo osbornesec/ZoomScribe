@@ -1,3 +1,5 @@
+"""Filesystem downloader for Zoom recordings with atomic writes and logging."""
+
 from __future__ import annotations
 
 import contextlib
@@ -28,7 +30,6 @@ class DownloadError(RuntimeError):
 
 def _sanitize(value: str) -> str:
     """Sanitize a path component so it is safe to use on local filesystems."""
-
     sanitized = _SANITIZE_PATTERN.sub("_", value or "")
     if sanitized and set(sanitized) <= {"."}:
         sanitized = "_"
@@ -48,14 +49,11 @@ class RecordingDownloader:
         progress_stream: IO[str] | None = None,
     ) -> None:
         """Initialise the downloader with a client capable of fetching bytes."""
-
         self.client = client
         self.logger = logger or logging.getLogger(__name__)
         self.max_workers = max(1, int(max_workers))
         self._progress_stream = progress_stream or sys.stderr
-        self._progress_isatty = bool(
-            getattr(self._progress_stream, "isatty", lambda: False)()
-        )
+        self._progress_isatty = bool(getattr(self._progress_stream, "isatty", lambda: False)())
 
     def build_file_path(
         self,
@@ -64,7 +62,6 @@ class RecordingDownloader:
         target_dir: str | Path,
     ) -> Path:
         """Return the destination path for a recording file within ``target_dir``."""
-
         target = Path(target_dir)
         start = recording.start_time
         host_dir = _sanitize(recording.host_email)
@@ -91,13 +88,10 @@ class RecordingDownloader:
         overwrite: bool = False,
     ) -> None:
         """Download the supplied recordings into ``target_dir`` respecting flags."""
-
         if dry_run:
             for recording in recordings:
                 for recording_file in recording.recording_files:
-                    destination = self.build_file_path(
-                        recording, recording_file, target_dir
-                    )
+                    destination = self.build_file_path(recording, recording_file, target_dir)
                     self._log_progress(
                         "dry_run",
                         destination,
@@ -110,9 +104,7 @@ class RecordingDownloader:
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             for recording in recordings:
                 for recording_file in recording.recording_files:
-                    destination = self.build_file_path(
-                        recording, recording_file, target_dir
-                    )
+                    destination = self.build_file_path(recording, recording_file, target_dir)
                     future = executor.submit(
                         self._download_single,
                         recording,
@@ -130,9 +122,7 @@ class RecordingDownloader:
                     for pending in futures:
                         if not pending.done():
                             pending.cancel()
-                    raise DownloadError(
-                        f"Failed to download {recording_file.id}"
-                    ) from exc
+                    raise DownloadError(f"Failed to download {recording_file.id}") from exc
 
     def _download_single(
         self,
@@ -142,7 +132,6 @@ class RecordingDownloader:
         overwrite: bool,
     ) -> Path:
         """Download a single recording file atomically to ``destination``."""
-
         existed_before = destination.exists()
         if existed_before and not overwrite:
             self._log_progress("skip_existing", destination, recording, recording_file)
@@ -171,7 +160,6 @@ class RecordingDownloader:
 
     def _download_contents(self, recording_file: RecordingFile) -> bytes:
         """Fetch the binary payload for ``recording_file`` using the backing client."""
-
         download_file = getattr(self.client, "download_file", None)
         if callable(download_file):
             data = download_file(
@@ -196,7 +184,6 @@ class RecordingDownloader:
         recording_file: RecordingFile,
     ) -> None:
         """Emit structured progress updates respecting TTY settings."""
-
         extra = {
             "event": event,
             "path": str(destination),

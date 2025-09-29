@@ -30,9 +30,7 @@ def test_build_file_path_sanitizes_components(sample_recording):
     downloader = RecordingDownloader(Mock())
     recording_file = sample_recording.recording_files[0]
 
-    destination = downloader.build_file_path(
-        sample_recording, recording_file, "/downloads"
-    )
+    destination = downloader.build_file_path(sample_recording, recording_file, "/downloads")
 
     path_str = destination.as_posix()
     assert "/downloads" in path_str

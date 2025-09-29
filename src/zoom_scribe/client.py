@@ -1,3 +1,5 @@
+"""HTTP client for Zoom APIs with retries, logging, and typed responses."""
+
 from __future__ import annotations
 
 import logging
@@ -5,7 +7,7 @@ import random
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Any, Final
+from typing import Any, Final, cast
 from urllib.parse import quote, urljoin
 
 import requests
@@ -23,6 +25,12 @@ RATE_LIMIT_TYPE_HEADER: Final = "x-ratelimit-type"
 RATE_LIMIT_REMAINING_HEADER: Final = "x-ratelimit-remaining"
 DEFAULT_TIMEOUT: Final[float] = 10.0
 RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
+HTTP_STATUS_BAD_REQUEST: Final[int] = 400
+HTTP_STATUS_UNAUTHORIZED: Final[int] = 401
+HTTP_STATUS_NOT_FOUND: Final[int] = 404
+HTTP_STATUS_TOO_MANY_REQUESTS: Final[int] = 429
+HTTP_STATUS_SERVER_ERROR: Final[int] = 500
+TIMEOUT_COMPONENTS: Final[int] = 2
 
 Timeout = float | tuple[float, float] | None
 JsonMapping = Mapping[str, Any]
@@ -41,6 +49,7 @@ class ZoomAPIError(RuntimeError):
         error_code: str | None = None,
         details: Any | None = None,
     ) -> None:
+        """Initialise the error message and capture relevant context."""
         super().__init__(message)
         self.status_code = status_code
         self.request_id = request_id
@@ -50,7 +59,6 @@ class ZoomAPIError(RuntimeError):
 
     def context(self) -> dict[str, Any]:
         """Return error metadata useful for logging."""
-
         return {
             "status_code": self.status_code,
             "request_id": self.request_id,
@@ -86,7 +94,6 @@ class TokenRefreshError(RuntimeError):
 
 def load_env_credentials(dotenv_path: str | None = None) -> dict[str, str]:
     """Load Zoom OAuth credentials from the environment into a plain dictionary."""
-
     try:
         credentials = load_oauth_credentials(dotenv_path=dotenv_path)
     except ConfigurationError as exc:  # pragma: no cover - translated in tests
@@ -96,14 +103,12 @@ def load_env_credentials(dotenv_path: str | None = None) -> dict[str, str]:
 
 def _double_urlencode(value: str) -> str:
     """Percent-encode ``value`` twice so it is safe for Zoom path parameters."""
-
     once = quote(value, safe="")
     return quote(once, safe="")
 
 
 def _encode_uuid(uuid: str) -> str:
     """Percent-encode a meeting UUID, double-encoding when Zoom requires it."""
-
     if uuid.startswith("/") or "//" in uuid:
         return _double_urlencode(uuid)
     return quote(uuid, safe="")
@@ -131,7 +136,6 @@ class ZoomAPIClient:
         retry_status_codes: frozenset[int] | None = None,
     ) -> None:
         """Initialize the client with credentials, HTTP settings, and logging."""
-
         self.account_id = account_id
         self.client_id = client_id
         self.client_secret = client_secret
@@ -156,9 +160,9 @@ class ZoomAPIClient:
         **overrides: Any,
     ) -> ZoomAPIClient:
         """Create a client using environment credentials with optional overrides."""
-
-        env_credentials = load_env_credentials(dotenv_path)
-        return cls(**env_credentials, **overrides)
+        env_credentials = cast(dict[str, Any], load_env_credentials(dotenv_path))
+        initial_kwargs = {**env_credentials, **overrides}
+        return cls(**initial_kwargs)
 
     def list_recordings(
         self,
@@ -184,7 +188,6 @@ class ZoomAPIClient:
         Raises:
             ValueError: If ``end`` is earlier than ``start``.
         """
-
         start_utc = ensure_utc(start)
         end_utc = ensure_utc(end)
         if end_utc < start_utc:
@@ -230,7 +233,6 @@ class ZoomAPIClient:
         page_size: int,
     ) -> list[Recording]:
         """List user recordings within the supplied date range."""
-
         effective_page_size = max(1, min(int(page_size), 300))
         params: dict[str, str] = {
             "from": start.strftime("%Y-%m-%d"),
@@ -268,13 +270,9 @@ class ZoomAPIClient:
         host_email: str | None,
     ) -> list[Recording]:
         """Collect meeting recordings within the window and optional host filter."""
-
         encoded_meeting_id = _encode_uuid(meeting_id)
-        meetings: list[Recording] = []
         try:
-            response = self._request_json(
-                "GET", f"past_meetings/{encoded_meeting_id}/instances"
-            )
+            response = self._request_json("GET", f"past_meetings/{encoded_meeting_id}/instances")
         except ZoomNotFoundError:
             response = {"meetings": []}
 
@@ -312,7 +310,6 @@ class ZoomAPIClient:
 
     def _fetch_meeting_recording(self, uuid: str) -> Recording:
         """Fetch the recordings payload for a specific meeting UUID."""
-
         path = f"meetings/{_encode_uuid(uuid)}/recordings"
         payload = self._request_json(
             "GET",
@@ -336,7 +333,6 @@ class ZoomAPIClient:
         timeout: Timeout = None,
     ) -> bytes:
         """Download a file, appending the access token when provided."""
-
         self._ensure_access_token()
         request_url = url
         if access_token:
@@ -353,10 +349,7 @@ class ZoomAPIClient:
             include_authorization=True,
             extra_headers={"Accept": "*/*", "Content-Type": None},
         )
-        content: list[bytes] = []
-        for chunk in response.iter_content(chunk_size=64 * 1024):
-            if chunk:
-                content.append(chunk)
+        content = [chunk for chunk in response.iter_content(chunk_size=64 * 1024) if chunk]
         response.close()
         self.logger.debug(
             "zoom.download_file.success",
@@ -369,11 +362,8 @@ class ZoomAPIClient:
 
     def download_recording_file(self, recording_file: RecordingFile) -> bytes:
         """Download bytes for a :class:`RecordingFile` instance."""
-
         access_token = recording_file.download_access_token
-        return self.download_file(
-            url=recording_file.download_url, access_token=access_token
-        )
+        return self.download_file(url=recording_file.download_url, access_token=access_token)
 
     def _request(
         self,
@@ -388,7 +378,6 @@ class ZoomAPIClient:
         extra_headers: Mapping[str, Any] | None = None,
     ) -> requests.Response:
         """Send an HTTP request with Zoom-specific retry and error handling."""
-
         self._ensure_access_token()
         url = urljoin(self.base_url, path)
         attempt = 0
@@ -425,7 +414,11 @@ class ZoomAPIClient:
             status_code = response.status_code
             request_id = response.headers.get(REQUEST_ID_HEADER)
 
-            if status_code == 401 and not auth_refreshed and include_authorization:
+            if (
+                status_code == HTTP_STATUS_UNAUTHORIZED
+                and not auth_refreshed
+                and include_authorization
+            ):
                 response.close()
                 self.logger.info(
                     "zoom.request.unauthorized_retry",
@@ -437,10 +430,7 @@ class ZoomAPIClient:
                 auth_refreshed = True
                 continue
 
-            if (
-                status_code in self.retry_status_codes
-                and attempt < self.max_retries
-            ):
+            if status_code in self.retry_status_codes and attempt < self.max_retries:
                 delay = self._retry_delay(attempt, response)
                 response.close()
                 self.logger.warning(
@@ -457,7 +447,7 @@ class ZoomAPIClient:
                 attempt += 1
                 continue
 
-            if status_code >= 400:
+            if status_code >= HTTP_STATUS_BAD_REQUEST:
                 try:
                     self._raise_api_error(response, safe_path, attempt)
                 finally:
@@ -474,7 +464,6 @@ class ZoomAPIClient:
         timeout: Timeout = None,
     ) -> JsonMapping:
         """Send a request and return the decoded JSON payload."""
-
         response = self._request(
             method,
             path,
@@ -506,7 +495,6 @@ class ZoomAPIClient:
 
     def _retry_delay(self, attempt: int, response: requests.Response) -> float:
         """Compute the retry delay using Retry-After or exponential backoff."""
-
         retry_after_header = response.headers.get(RETRY_AFTER_HEADER)
         if retry_after_header:
             try:
@@ -515,8 +503,8 @@ class ZoomAPIClient:
                     return retry_after_value
             except ValueError:  # pragma: no cover - defensive
                 pass
-        jitter = random.uniform(0.5, 1.5)  # noqa: S311 - non-crypto backoff jitter
-        return self.backoff_factor * (2**attempt) * jitter
+        jitter = random.uniform(0.5, 1.5)
+        return float(self.backoff_factor * (2**attempt) * jitter)
 
     def _raise_api_error(
         self,
@@ -525,7 +513,6 @@ class ZoomAPIClient:
         attempt: int,
     ) -> None:
         """Normalize HTTP errors into rich Zoom-specific exceptions."""
-
         status_code = response.status_code
         request_id = response.headers.get(REQUEST_ID_HEADER)
         retry_after_header = response.headers.get(RETRY_AFTER_HEADER)
@@ -571,27 +558,29 @@ class ZoomAPIClient:
         }
         self.logger.error("zoom.request.error", extra=extra)
 
-        exception_kwargs = {
-            "status_code": status_code,
-            "request_id": request_id,
-            "retry_after": retry_after,
-            "error_code": error_code,
-            "details": details,
-        }
+        def _raise(exception_type: type[ZoomAPIError]) -> None:
+            raise exception_type(
+                message,
+                status_code=status_code,
+                request_id=request_id,
+                retry_after=retry_after,
+                error_code=error_code,
+                details=details,
+            )
 
-        if status_code == 401:
-            raise ZoomAuthError(message, **exception_kwargs)
-        if status_code == 404:
-            raise ZoomNotFoundError(message, **exception_kwargs)
-        if status_code == 429:
-            raise ZoomRateLimitError(message, **exception_kwargs)
-        if status_code >= 500:
-            raise ZoomRetryableError(message, **exception_kwargs)
-        raise ZoomAPIError(message, **exception_kwargs)
+        if status_code == HTTP_STATUS_UNAUTHORIZED:
+            _raise(ZoomAuthError)
+        elif status_code == HTTP_STATUS_NOT_FOUND:
+            _raise(ZoomNotFoundError)
+        elif status_code == HTTP_STATUS_TOO_MANY_REQUESTS:
+            _raise(ZoomRateLimitError)
+        elif status_code >= HTTP_STATUS_SERVER_ERROR:
+            _raise(ZoomRetryableError)
+        else:
+            _raise(ZoomAPIError)
 
     def _headers(self) -> dict[str, str]:
         """Return standard JSON headers including the bearer token."""
-
         self._ensure_access_token()
         return {
             "Authorization": f"Bearer {self._access_token}",
@@ -601,36 +590,30 @@ class ZoomAPIClient:
 
     def _ensure_access_token(self) -> None:
         """Ensure a valid OAuth access token is cached or fetch a new one."""
-
         if self._access_token and self._token_expiry is None:
             return
         skew = 60.0  # seconds
         token_expired = bool(
-            self._token_expiry is not None
-            and (self._token_expiry - skew) <= self._clock()
+            self._token_expiry is not None and (self._token_expiry - skew) <= self._clock()
         )
         if self._access_token and not token_expired:
             return
         if not all([self.account_id, self.client_id, self.client_secret]):
             if self._access_token and token_expired:
-                raise TokenRefreshError(
-                    "Cannot refresh access token without OAuth credentials"
-                )
+                raise TokenRefreshError("Cannot refresh access token without OAuth credentials")
             raise MissingCredentialsError("OAuth credentials are required")
 
         assert self.client_id is not None
         assert self.client_secret is not None
         assert self.account_id is not None
-        self.logger.debug(
-            "zoom.auth.request_token", extra={"token_url": self.token_url}
-        )
+        self.logger.debug("zoom.auth.request_token", extra={"token_url": self.token_url})
         response = self.session.post(
             self.token_url,
             data={"grant_type": "account_credentials", "account_id": self.account_id},
             auth=(self.client_id, self.client_secret),
             timeout=self.timeout,
         )
-        if response.status_code >= 400:
+        if response.status_code >= HTTP_STATUS_BAD_REQUEST:
             response.close()
             raise ZoomAuthError(
                 "Failed to obtain Zoom access token",
@@ -641,9 +624,7 @@ class ZoomAPIClient:
         response.close()
         self._access_token = payload["access_token"]
         expires_in = payload.get("expires_in")
-        self._token_expiry = (
-            self._clock() + float(expires_in) if expires_in else None
-        )
+        self._token_expiry = self._clock() + float(expires_in) if expires_in else None
         self.logger.info(
             "zoom.auth.token_acquired",
             extra={"expires_in": expires_in, "has_expiry": bool(expires_in)},
@@ -652,7 +633,6 @@ class ZoomAPIClient:
     @staticmethod
     def _path_template_for_log(path: str) -> str:
         """Return a path string with identifiers masked for logging."""
-
         sensitive_containers = {"users", "meetings", "past_meetings"}
         masked_segments: list[str] = []
         mask_next = False
@@ -669,7 +649,6 @@ class ZoomAPIClient:
     @staticmethod
     def _validate_timeout(timeout: Timeout) -> Timeout:
         """Ensure a timeout is either ``None``, a non-negative float, or tuple."""
-
         if timeout is None:
             return None
         if isinstance(timeout, bool):
@@ -680,14 +659,12 @@ class ZoomAPIClient:
                 raise ValueError("Timeout must be non-negative")
             return numeric_timeout
         if isinstance(timeout, tuple):
-            if len(timeout) != 2:
+            if len(timeout) != TIMEOUT_COMPONENTS:
                 raise ValueError("Timeout tuple must contain exactly two values")
             connect, read = timeout
             normalized: list[float] = []
             for component in (connect, read):
-                if isinstance(component, bool) or not isinstance(
-                    component, (int, float)
-                ):
+                if isinstance(component, bool) or not isinstance(component, (int, float)):
                     raise TypeError("Timeout tuple values must be numeric")
                 numeric_component = float(component)
                 if numeric_component < 0:
@@ -698,7 +675,6 @@ class ZoomAPIClient:
 
     def _compute_backoff(self, attempt: int, response: requests.Response) -> float:
         """Backward-compatible shim for legacy tests using ``_compute_backoff``."""
-
         return self._retry_delay(attempt, response)
 
 

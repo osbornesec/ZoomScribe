@@ -21,6 +21,11 @@ ignore = ["D203", "D212", "D401"]
 [tool.ruff.lint.isort]
 known-first-party = ["zoom_scribe"]
 
+[tool.ruff.lint.per-file-ignores]
+"src/tests/**/*.py" = ["D", "PLR2004"]
+"src/zoom_scribe/client.py" = ["PLR0912", "PLR0913"]
+"src/zoom_scribe/config.py" = ["PLR0913"]
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
@@ -35,4 +40,8 @@ no_implicit_optional = true
 warn_return_any = true
 warn_redundant_casts = true
 warn_unused_configs = true
-exclude = ["build", "dist", ".venv"]
+exclude = ["build", "dist", ".venv", "src/tests"]
+
+[[tool.mypy.overrides]]
+module = ["dotenv"]
+ignore_missing_imports = true

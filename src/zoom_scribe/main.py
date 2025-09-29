@@ -1,3 +1,5 @@
+"""Command-line interface for ZoomScribe."""
+
 from __future__ import annotations
 
 import json
@@ -42,6 +44,7 @@ class JsonFormatter(logging.Formatter):
     """Serialize log records to JSON, preserving custom ``extra`` fields."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Return a JSON-encoded representation of ``record``."""
         payload: dict[str, object] = {
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
@@ -67,7 +70,6 @@ def configure_logging(level: str, fmt: str) -> logging.Logger:
     Returns:
         logging.Logger: Root logger for the Zoom Scribe namespace.
     """
-
     resolved_level = getattr(logging, level.upper(), logging.INFO)
     handler = logging.StreamHandler()
     resolved_format = fmt.lower()
@@ -140,15 +142,9 @@ def create_downloader(
     help="Directory to save recordings",
 )
 @click.option("--host-email", default=None, help="Filter recordings by host email")
-@click.option(
-    "--meeting-id", default=None, help="Filter recordings by meeting id or UUID"
-)
-@click.option(
-    "--dry-run", is_flag=True, default=False, help="List recordings without downloading"
-)
-@click.option(
-    "--overwrite", is_flag=True, default=False, help="Overwrite existing files"
-)
+@click.option("--meeting-id", default=None, help="Filter recordings by meeting id or UUID")
+@click.option("--dry-run", is_flag=True, default=False, help="List recordings without downloading")
+@click.option("--overwrite", is_flag=True, default=False, help="Overwrite existing files")
 @click.option(
     "--log-level",
     type=click.Choice(["debug", "info", "warning", "error", "critical"], case_sensitive=False),
@@ -163,7 +159,7 @@ def create_downloader(
     show_default=True,
     help="Logging output format",
 )
-def cli(
+def cli(  # noqa: PLR0913
     from_date: datetime | None,
     to_date: datetime | None,
     target_dir: str,
@@ -239,9 +235,7 @@ def cli(
     downloader.download(recordings, target_path, dry_run=dry_run, overwrite=overwrite)
 
     if dry_run:
-        click.echo(
-            f"Dry run complete. {len(recordings)} recordings would be processed."
-        )
+        click.echo(f"Dry run complete. {len(recordings)} recordings would be processed.")
     else:
         click.echo(f"Downloaded {len(recordings)} recordings.")
 

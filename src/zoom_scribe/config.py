@@ -1,8 +1,11 @@
+"""Environment configuration utilities for Zoom S2S OAuth credentials."""
+
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import Mapping, MutableMapping
+from typing import IO, cast
 
 try:  # pragma: no cover - imported lazily in production environments
     from dotenv import find_dotenv, load_dotenv
@@ -18,7 +21,7 @@ except ImportError:  # pragma: no cover - fallback for minimal environments
 
     def load_dotenv(
         dotenv_path: str | os.PathLike[str] | None = None,
-        stream=None,
+        stream: IO[str] | None = None,
         verbose: bool = False,
         override: bool = False,
         interpolate: bool = True,
@@ -37,12 +40,14 @@ class ConfigurationError(RuntimeError):
     """Raised when Zoom configuration is missing or invalid."""
 
 
+REDACTION_SUFFIX_LENGTH = 4
+
+
 def _mask(value: str) -> str:
     """Return a partially redacted form of ``value`` for logging."""
-
-    if len(value) <= 4:
+    if len(value) <= REDACTION_SUFFIX_LENGTH:
         return "***"
-    return f"***{value[-4:]}"
+    return f"***{value[-REDACTION_SUFFIX_LENGTH:]}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +59,7 @@ class OAuthCredentials:
     client_secret: str
 
     def __post_init__(self) -> None:
+        """Ensure all credential fields are populated."""
         for field_name, value in (
             ("account_id", self.account_id),
             ("client_id", self.client_id),
@@ -64,18 +70,17 @@ class OAuthCredentials:
 
     def to_dict(self) -> Mapping[str, str]:
         """Return the credentials as a plain mapping for convenience."""
-
         return {
             "account_id": self.account_id,
             "client_id": self.client_id,
             "client_secret": self.client_secret,
         }
 
-    def __repr__(self) -> str:  # pragma: no cover - human friendly representation
+    def __repr__(self) -> str:  # pragma: no cover - human friendly representation  # noqa: D105
         return (
-            "OAuthCredentials(" \
-            f"account_id={_mask(self.account_id)}, " \
-            f"client_id={_mask(self.client_id)}, " \
+            "OAuthCredentials("
+            f"account_id={_mask(self.account_id)}, "
+            f"client_id={_mask(self.client_id)}, "
             "client_secret=***"
             ")"
         )
@@ -101,12 +106,11 @@ def load_oauth_credentials(
     Raises:
         ConfigurationError: When any credential is missing.
     """
-
     env: MutableMapping[str, str | None]
     if environ is not None:
         env = dict(environ)
     else:
-        env = os.environ
+        env = cast(MutableMapping[str, str | None], os.environ)
         resolved_path = None
         if dotenv_path:
             resolved_path = find_dotenv(str(dotenv_path), raise_error_if_not_found=False)
@@ -140,10 +144,10 @@ def load_oauth_credentials(
 
 
 __all__ = [
-    "ConfigurationError",
     "ENV_ACCOUNT_ID",
     "ENV_CLIENT_ID",
     "ENV_CLIENT_SECRET",
+    "ConfigurationError",
     "OAuthCredentials",
     "load_oauth_credentials",
 ]
