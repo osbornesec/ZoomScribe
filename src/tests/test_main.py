@@ -176,6 +176,16 @@ def test_screenshare_preprocess_command_writes_output(
     video.write_bytes(b"data")
 
     def fake_preprocess(path: Path, _config: Any) -> list[Any]:
+        """
+        Test stub for a video preprocessing function used in unit tests.
+        
+        Parameters:
+            path (Path): Path to the video file to preprocess; this stub asserts that `path` matches the expected test video and will raise AssertionError if it does not.
+            _config (Any): Ignored configuration parameter kept for signature compatibility.
+        
+        Returns:
+            list[Any]: An empty list representing no preprocessing results.
+        """
         assert path == video
         return []
 
@@ -210,6 +220,16 @@ def test_screenshare_preprocess_command_handles_errors(
     video.write_bytes(b"data")
 
     def raise_error(*_args: Any, **_kwargs: Any) -> list[Any]:
+        """
+        Always raises a PreprocessingError with the message "failed".
+        
+        Parameters:
+            *_args: Ignored positional arguments.
+            **_kwargs: Ignored keyword arguments.
+        
+        Raises:
+            PreprocessingError: Always raised with the message "failed".
+        """
         raise PreprocessingError("failed")
 
     monkeypatch.setattr("zoom_scribe.main.preprocess_video", raise_error)

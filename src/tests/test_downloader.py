@@ -101,6 +101,11 @@ def test_download_in_dry_run_mode(tmp_path: Path, sample_recording: Recording) -
     hook_called = False
 
     def hook(*_args: Any) -> None:
+        """
+        Mark the outer `hook_called` flag as True when invoked.
+        
+        Accepts any positional arguments (ignored) and sets the nonlocal `hook_called` variable to True as a side effect. This function does not return a value. Note: it mutates an enclosing variable and is not inherently thread-safe.
+        """
         nonlocal hook_called
         hook_called = True
 
@@ -209,6 +214,18 @@ def test_download_invokes_post_download_hook(tmp_path: Path, sample_recording: R
     calls: list[Path] = []
 
     def hook(path: Path, *_args: Any) -> None:
+        """
+        Record the provided destination path by appending it to the outer `calls` list.
+        
+        This hook accepts a Path and any additional positional arguments (ignored) and appends `path` to a preexisting `calls` list in the enclosing scope. It mutates that list as a side effect and does not return a value.
+        
+        Parameters:
+            path (Path): Destination path produced by the downloader that should be recorded.
+            *_args (Any): Additional positional arguments are accepted and ignored.
+        
+        Thread-safety:
+            This function performs a plain append on the shared `calls` list and is not synchronized; callers must ensure proper locking when used concurrently.
+        """
         calls.append(path)
 
     downloader.download(

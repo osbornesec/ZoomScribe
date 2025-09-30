@@ -22,7 +22,24 @@ from zoom_scribe.screenshare.preprocess import (
 
 @pytest.fixture
 def synthetic_video(tmp_path: Path) -> Path:
-    """Create a deterministic synthetic MP4 screenshare clip."""
+    """
+    Create a deterministic synthetic MP4 screenshare clip and return its path.
+    
+    The created clip is 3 seconds long at 10 FPS, 640×480 pixels, and contains simple text overlays that vary between the first and second half of the video. The file is written into the provided temporary directory.
+    
+    Parameters:
+        tmp_path (Path): Directory where the synthetic MP4 file will be created.
+    
+    Returns:
+        Path: Path to the written MP4 file within tmp_path.
+    
+    Raises:
+        pytest.skip: If a suitable video writer backend cannot be initialized, the test is skipped (no file will be created).
+    
+    Side effects:
+        - Writes a file named "synthetic.mp4" into tmp_path.
+        - Uses a fixed random seed to ensure deterministic output.
+    """
 
     np.random.seed(0)
     video_path = tmp_path / "synthetic.mp4"
@@ -49,6 +66,14 @@ def synthetic_video(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def default_config() -> PreprocessConfig:
+    """
+    Return a PreprocessConfig populated with the library's default preprocessing settings.
+    
+    The returned configuration contains the module's validated defaults (for example: target_fps, roi_detection_duration_sec, ssim_threshold, bundle_max_frames, bundle_max_time_gap_sec). This function has no side effects and is safe to call from multiple threads.
+    
+    Returns:
+        PreprocessConfig: A configuration instance initialized with default, validated values.
+    """
     return PreprocessConfig()
 
 
@@ -158,6 +183,16 @@ def test_extract_frames_at_fps(synthetic_video: Path, default_config: Preprocess
 def test_extract_frames_crops_to_roi(
     synthetic_video: Path, default_config: PreprocessConfig
 ) -> None:
+    """
+    Verifies that frames extracted at the configured target FPS are cropped to the detected ROI dimensions.
+    
+    Parameters:
+        synthetic_video (Path): Path to the synthetic MP4 video used for testing.
+        default_config (PreprocessConfig): Configuration used for ROI detection and frame extraction.
+    
+    Raises:
+        AssertionError: If any extracted frame's width or height does not match the ROI's width or height.
+    """
     roi = detect_roi(synthetic_video, default_config)
     frames = extract_frames_at_fps(synthetic_video, default_config.target_fps, roi)
     for _, _, frame in frames:

@@ -52,6 +52,15 @@ def test_recording_from_api_creates_recording_files(recording_file_payload: dict
 
 
 def test_recording_from_api_requires_uuid(recording_file_payload: dict[str, Any]) -> None:
+    """
+    Verify that Recording.from_api raises ModelValidationError when the input payload is missing the required `uuid` field.
+    
+    Parameters:
+        recording_file_payload (dict[str, Any]): Fixture payload for a recording file used to populate the `recording_files` list.
+    
+    Raises:
+        ModelValidationError: Raised by Recording.from_api when the payload does not include the required `uuid`.
+    """
     payload: dict[str, Any] = {
         "topic": "Team Sync",
         "host_email": "host@example.com",

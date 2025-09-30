@@ -127,14 +127,15 @@ def create_client() -> ZoomAPIClient:
 def create_downloader(
     client: ZoomAPIClient, logger: logging.Logger | None = None
 ) -> RecordingDownloader:
-    """Build a RecordingDownloader bound to the provided client and logger.
-
-    Args:
-        client: Configured Zoom API client used to fetch recording bytes.
-        logger: Optional logger for progress reporting.
-
+    """
+    Create a RecordingDownloader bound to the given Zoom API client and optional logger.
+    
+    Parameters:
+        client (ZoomAPIClient): Configured Zoom API client used to fetch recording files.
+        logger (logging.Logger | None): Optional logger for progress reporting and structured events.
+    
     Returns:
-        RecordingDownloader: Downloader instance tied to ``client``.
+        RecordingDownloader: Downloader configured with the provided client and logger.
     """
     return RecordingDownloader(client, logger=logger)
 
@@ -231,7 +232,50 @@ def cli() -> None:
     help="Logging output format",
 )
 def download(**options: Any) -> None:
-    """Run the CLI workflow to fetch and optionally download Zoom recordings."""
+    """
+    Run the CLI workflow to list Zoom recordings and optionally download them to disk with optional screenshare preprocessing.
+    
+    This command configures logging, resolves the requested date range and destination, lists recordings from the Zoom API, and uses a RecordingDownloader to download files. When screenshare preprocessing is enabled, it will create a PreprocessConfig factory and invoke a per-file post-download hook that may write frame→time mapping files. The function prints a brief summary to stdout when complete and emits structured log events.
+    
+    Parameters:
+        **options: Any
+            A mapping of CLI option names to values. Recognized keys:
+            - "from_date" (datetime | None): Start of the date range (assumed UTC if naive).
+            - "to_date" (datetime | None): End of the date range (assumed UTC if naive).
+            - "target_dir" (str): Destination directory for downloads.
+            - "host_email" (str | None): Filter recordings by host email.
+            - "meeting_id" (str | None): Filter recordings by meeting ID.
+            - "dry_run" (bool): If true, list recordings without writing files.
+            - "overwrite" (bool): If true, overwrite existing files.
+            - "screenshare_preprocess" (bool): If true, run screenshare preprocessing for screenshare files.
+            - "screenshare_output_dir" (Path | None): Directory to write frame mapping outputs (overrides per-download destination).
+            - "screenshare_target_fps" (float): Target FPS for preprocessing.
+            - "screenshare_roi_seconds" (float): Seconds of video used for ROI detection.
+            - "screenshare_ssim_threshold" (float): SSIM threshold for frame similarity during bundling.
+            - "screenshare_bundle_max_frames" (int): Maximum frames per preprocessing bundle.
+            - "screenshare_bundle_gap" (float): Maximum time gap (seconds) to start a new bundle.
+            - "log_level" (str): Logging level name.
+            - "log_format" (str): Logging format ("auto", "text", or "json").
+    
+    Raises:
+        click.BadParameter: If the resolved start date is after the end date, or if the specified target path exists but is not a directory.
+        OSError: Propagates filesystem errors encountered when writing mapping files or creating directories (when not handled by internal hooks).
+    
+    Side effects:
+        - Configures the "zoom_scribe" logger and emits structured log events.
+        - Calls out to the Zoom API via create_client() and list_recordings().
+        - May download files to disk and overwrite existing files depending on options.
+        - When enabled, may run video preprocessing and write frame→time mapping files.
+        - Prints a short completion message to stdout.
+    
+    Preconditions and invariants:
+        - If present, provided datetimes are interpreted as UTC when naive.
+        - The effective start date will be set to (end - 30 days) when no start date is supplied.
+        - The target path must be a directory or not exist prior to invoking downloads.
+    
+    Concurrency:
+        - This function is not thread-safe with respect to global logging configuration; callers should avoid concurrent invocations that reconfigure logging.
+    """
     configure_logging(
         cast(str, options["log_level"]),
         cast(str, options["log_format"]),
@@ -289,6 +333,17 @@ def download(**options: Any) -> None:
     if screenshare_preprocess:
 
         def _factory() -> PreprocessConfig:
+            """
+            Create a PreprocessConfig populated from the enclosing screenshare option values.
+            
+            Returns:
+                PreprocessConfig: Configuration with:
+                    - target_fps set to `screenshare_target_fps`
+                    - roi_detection_duration_sec set to `screenshare_roi_seconds`
+                    - ssim_threshold set to `screenshare_ssim_threshold`
+                    - bundle_max_frames set to `screenshare_bundle_max_frames`
+                    - bundle_max_time_gap_sec set to `screenshare_bundle_gap`
+            """
             return PreprocessConfig(
                 target_fps=screenshare_target_fps,
                 roi_detection_duration_sec=screenshare_roi_seconds,
@@ -333,7 +388,11 @@ def download(**options: Any) -> None:
 
 @cli.group()
 def screenshare() -> None:
-    """Screenshare preprocessing utilities."""
+    """
+    Click command group exposing screenshare-related CLI commands.
+    
+    Registers screenshare-related subcommands (for example, `preprocess`) for the application's command-line interface so they can be invoked as `zoom_scribe screenshare <subcommand>`.
+    """
 
 
 @screenshare.command("preprocess")
@@ -394,7 +453,31 @@ def screenshare() -> None:
     help="Logging output format",
 )
 def preprocess_command(**options: Any) -> None:
-    """Run standalone screenshare preprocessing for a single video."""
+    """
+    Run screenshare preprocessing for a single video file and emit a frame→time mapping.
+    
+    Configures logging from options, builds a PreprocessConfig from provided options, runs preprocessing on the given video, builds a frame-to-time mapping, and either writes the mapping to the specified output file or prints it to stdout.
+    
+    Parameters:
+        options (dict-like): Expect the following keys:
+            - "log_level" (str): Logging level name (e.g., "INFO").
+            - "log_format" (str): Logging format identifier ("auto", "json", "text").
+            - "video" (Path): Path to the input video to preprocess.
+            - "target_fps" (float): Target frames per second for preprocessing.
+            - "roi_seconds" (float): Duration in seconds used for ROI detection.
+            - "ssim_threshold" (float): SSIM threshold for frame similarity grouping.
+            - "bundle_max_frames" (int): Maximum frames per bundle.
+            - "bundle_gap" (float): Maximum time gap (seconds) allowed between frames in a bundle.
+            - "output" (Path | None): Optional path to write the frame mapping; when omitted the mapping is printed.
+    
+    Side effects:
+        - Configures the module logger via configure_logging.
+        - May create parent directories and write the mapping file with a trailing newline if "output" is provided.
+        - Writes status or mapping text to stdout via click.echo.
+    
+    Raises:
+        click.ClickException: If preprocessing fails (wraps PreprocessingError) or if writing the output file fails due to an OSError.
+    """
     configure_logging(
         cast(str, options["log_level"]),
         cast(str, options["log_format"]),
@@ -438,18 +521,42 @@ def _build_screenshare_post_download(
     config_factory: Callable[[], PreprocessConfig] | None,
     logger: logging.Logger,
 ) -> Callable[[Path, Recording, RecordingFile], None] | None:
-    """Create a post-download hook that runs screenshare preprocessing.
-
-    Args:
-        enabled: Whether preprocessing is requested by the caller.
-        dry_run: Whether the downloader is running in dry-run mode.
-        destination_dir: Optional directory for mapping outputs.
-        config_factory: Factory returning the preprocessing configuration.
-        logger: Logger used for structured progress and error reporting.
-
+    """
+    Create a post-download hook that runs screenshare preprocessing for downloaded recording files.
+    
+    When preprocessing is enabled and not a dry run, returns a callable that:
+    - Is a no-op for files that are not identified as screenshare videos.
+    - Runs preprocess_video(...) with a PreprocessConfig obtained from `config_factory()`.
+    - Builds a frame→time mapping via build_frame_time_mapping(...) and writes it to a file named
+      "{destination.stem}_frame_map.txt" in `destination_dir` (if provided) or alongside `destination`.
+    - Ensures the mapping directory exists before writing.
+    - Emits structured log events for failures and for successful completion.
+    
+    Parameters:
+        enabled: Whether preprocessing was requested; when False the function returns None.
+        dry_run: If True the function returns None (preprocessing is skipped).
+        destination_dir: Optional directory where the mapping file will be written; when None the mapping
+            file is written next to the downloaded `destination` file.
+        config_factory: Callable returning a PreprocessConfig to use for preprocessing; when None the
+            function returns None.
+        logger: Logger used to record structured progress, warnings, and errors.
+    
     Returns:
-        Callable that performs preprocessing for each recording file, or ``None``
-        when preprocessing should be skipped.
+        A callable with signature (destination: Path, recording: Recording, recording_file: RecordingFile)
+        -> None that performs the preprocessing and writes the mapping file, or `None` when preprocessing
+        should be skipped because `enabled` is False, `dry_run` is True, or `config_factory` is None.
+    
+    Side effects:
+        - May create directories (mapping parent) and write a mapping text file to disk.
+        - Logs warnings on preprocessing failures and errors on file write failures.
+        - Does not raise exceptions for preprocessing failures or write errors; those are logged and the
+          post-download hook returns early.
+    
+    Preconditions and concurrency:
+        - `config_factory()` must return a valid PreprocessConfig; invalid configs may cause preprocessing
+          to fail and will be handled by logging.
+        - The returned callable makes no explicit concurrency guarantees; callers should synchronize
+          concurrent invocations if `preprocess_video` or downstream code require it.
     """
     if not enabled or dry_run or config_factory is None:
         return None
@@ -461,7 +568,28 @@ def _build_screenshare_post_download(
         recording: Recording,
         recording_file: RecordingFile,
     ) -> None:
-        """Process a downloaded recording file to emit screenshare bundles."""
+        """
+        Run screenshare preprocessing for a downloaded recording file and write a frame→time mapping file.
+        
+        If the provided recording_file is identified as a screenshare video, this function runs preprocess_video() to produce bundles, builds a frame-to-time mapping, and writes the mapping to a file named "{destination.stem}_frame_map.txt" in the mapping directory.
+        
+        Parameters:
+            destination (Path): Filesystem path to the downloaded recording file.
+            recording (Recording): Recording metadata for the download; used only for logging.
+            recording_file (RecordingFile): Metadata for the specific file; used to determine whether preprocessing should run.
+        
+        Side effects:
+            - May create the mapping directory (mapping_parent) if it does not exist.
+            - Writes a UTF-8 text file with the frame→time mapping and a trailing newline.
+            - Emits structured log events:
+                - "screenshare.preprocess_failed" when preprocessing fails (PreprocessingError).
+                - "screenshare.mapping_write_failed" when writing the mapping file fails (OSError).
+                - "screenshare.preprocess_complete" on successful completion, including destination, mapping_path, total frames, and bundle count.
+        
+        Error handling:
+            - Catches PreprocessingError from preprocess_video(), logs a warning with redacted identifiers, and returns without raising.
+            - Catches OSError when writing the mapping file, logs an error with exc_info, and returns without raising.
+        """
         if not _is_screenshare_file(recording_file):
             return
         mapping_parent = destination_dir or destination.parent
@@ -509,7 +637,17 @@ def _build_screenshare_post_download(
 
 
 def _is_screenshare_file(recording_file: RecordingFile) -> bool:
-    """Return ``True`` when ``recording_file`` represents a screenshare video."""
+    """
+    Determine whether a RecordingFile represents a screenshare video.
+    
+    Checks the recording file metadata to decide if it is a screenshare recording: the file's type contains the substring "SCREEN" (case-insensitive) and the file extension is one of "mp4", "mkv", or "mov".
+    
+    Parameters:
+        recording_file (RecordingFile): Recording file metadata to inspect.
+    
+    Returns:
+        bool: `true` if the recording_file is identified as a screenshare video, `false` otherwise.
+    """
     file_type = recording_file.file_type.upper()
     if "SCREEN" not in file_type:
         return False

@@ -56,7 +56,17 @@ class PreprocessConfig:
     bundle_max_time_gap_sec: float = 2.0
 
     def __post_init__(self) -> None:
-        """Validate configuration values."""
+        """
+        Validate PreprocessConfig field invariants.
+        
+        Raises:
+            ValueError: If any of the following conditions are violated:
+                - `target_fps` is not greater than 0.
+                - `roi_detection_duration_sec` is not greater than 0.
+                - `ssim_threshold` is not greater than 0.
+                - `bundle_max_frames` is not greater than 0.
+                - `bundle_max_time_gap_sec` is negative.
+        """
         if self.target_fps <= 0:
             raise ValueError("target_fps must be greater than 0")
         if self.roi_detection_duration_sec <= 0:
@@ -80,7 +90,12 @@ class ROIMetadata:
     confidence: float
 
     def __post_init__(self) -> None:
-        """Validate ROI field constraints."""
+        """
+        Validate that ROI dimensions and confidence are within allowed ranges.
+        
+        Raises:
+            ValueError: If `width` or `height` is less than or equal to 0, or if `confidence` is not between 0.0 and 1.0 inclusive.
+        """
         if self.width <= 0 or self.height <= 0:
             raise ValueError("ROI dimensions must be greater than 0")
         if not 0.0 <= self.confidence <= 1.0:
@@ -97,7 +112,12 @@ class FrameBundle:
     roi: ROIMetadata
 
     def __post_init__(self) -> None:
-        """Validate bundle metadata consistency."""
+        """
+        Ensure the FrameBundle's frames, frame_indices, and timestamps_sec are non-empty and have equal lengths.
+        
+        Raises:
+            ValueError: If the three sequences do not all have the same length or if any sequence is empty.
+        """
         lengths = {
             len(self.frames),
             len(self.frame_indices),
@@ -110,24 +130,34 @@ class FrameBundle:
 
     @property
     def duration_sec(self) -> float:
-        """Duration of the bundle in seconds."""
+        """
+        Compute the time span covered by the bundle's timestamps.
+        
+        Returns:
+            Duration in seconds between the first and last timestamp in `timestamps_sec`; returns 0.0 if the bundle contains fewer than two timestamps.
+        """
         if len(self.timestamps_sec) <= 1:
             return 0.0
         return self.timestamps_sec[-1] - self.timestamps_sec[0]
 
 
 def detect_roi(video_path: Path, config: PreprocessConfig) -> ROIMetadata:
-    """Detect the primary region of interest within a screenshare video.
-
-    Args:
-        video_path: Path to the input video.
-        config: Preprocessing configuration describing ROI detection parameters.
-
+    """
+    Detect the primary region of interest (ROI) in a screenshare video.
+    
+    Scans up to config.roi_detection_duration_sec seconds of the input video and identifies the most prominent rectangular region
+    containing foreground content; returns its coordinates, size, and a confidence score in [0.0, 1.0]. The function opens the video
+    file and always releases the underlying capture resource before returning.
+    
+    Parameters:
+        video_path (Path): Path to the input video file; must exist and be a regular file.
+        config (PreprocessConfig): Configuration controlling ROI detection duration and related parameters.
+    
     Returns:
-        The detected ROI metadata.
-
+        ROIMetadata: Detected ROI with x, y, width, height, and confidence (0.0–1.0).
+    
     Raises:
-        PreprocessingError: If the video cannot be read or no ROI is found.
+        PreprocessingError: If video_path is missing or not a file, the video cannot be opened/read, or no ROI is found.
     """
     if not video_path.is_file():
         raise PreprocessingError("Video path does not exist or is not a file")
@@ -189,18 +219,32 @@ def detect_roi(video_path: Path, config: PreprocessConfig) -> ROIMetadata:
 def extract_frames_at_fps(
     video_path: Path, target_fps: float, roi: ROIMetadata
 ) -> list[tuple[int, float, FrameArray]]:
-    """Extract frames from the input video at a fixed sampling rate.
-
-    Args:
-        video_path: Path to the input video.
-        target_fps: Target sampling frequency for frame extraction.
-        roi: Region of interest used to crop each extracted frame.
-
+    """
+    Sample and crop frames from a video at a fixed target frame rate using the provided ROI.
+    
+    The function opens the video file, determines the native FPS (falls back to 30.0 if unavailable),
+    and samples frames by skipping frames so the effective sampling rate approximates `target_fps`.
+    Each sampled frame is timestamped as `frame_index / native_fps` and cropped to the supplied
+    `roi` (crop bounds are clamped to the frame bounds). The video capture is always released before
+    returning.
+    
+    Parameters:
+        video_path (Path): Path to the input video file; must exist and be a regular file.
+        target_fps (float): Desired sampling frequency in frames per second; must be > 0.
+        roi (ROIMetadata): Region of interest used to crop each sampled frame (width/height must be > 0).
+    
     Returns:
-        A list of (frame_index, timestamp_sec, cropped_frame) tuples.
-
+        list[tuple[int, float, FrameArray]]: A list of tuples (frame_index, timestamp_sec, cropped_frame)
+        for each sampled and cropped frame. `timestamp_sec` is a floating-point number in seconds.
+    
     Raises:
-        PreprocessingError: If the video cannot be read or no frames are extracted.
+        PreprocessingError: If the video path does not exist, the video cannot be opened,
+        the ROI lies outside frame bounds, or if no frames were extracted.
+    
+    Side effects:
+        - Opens the video file with cv2.VideoCapture and performs I/O while reading frames.
+        - Always releases the video capture before returning.
+        - Not safe for concurrent writes to the same video file; reading the same file concurrently is allowed.
     """
     if not video_path.is_file():
         raise PreprocessingError("Video path does not exist or is not a file")
@@ -246,14 +290,22 @@ def extract_frames_at_fps(
 def gate_frames_by_ssim(
     frames: list[tuple[int, float, FrameArray]], threshold: float
 ) -> list[tuple[int, float, FrameArray]]:
-    """Filter frames based on structural similarity differences.
-
+    """
+    Filter a sequence of frames by structural dissimilarity to remove near-duplicate frames.
+    
+    Keeps the first frame (if any) and then retains any subsequent frame whose change from the last kept frame,
+    measured as (1 - SSIM), is greater than or equal to `threshold`. Returns an empty list if `frames` is empty.
+    
     Args:
-        frames: Extracted frames along with their metadata.
-        threshold: Minimum change (1 - SSIM) required to keep a frame.
-
+        frames: List of tuples (frame_index, timestamp_sec, frame_array). `frame_array` may be color or grayscale.
+        threshold: Minimum required dissimilarity (1 - SSIM) to keep a frame; higher values produce more aggressive filtering.
+    
     Returns:
-        A filtered list of frames where sequential frames differ beyond the threshold.
+        A list of the input frame tuples that passed the SSIM gating, preserving original order.
+    
+    Notes:
+        - This function does not modify input frames.
+        - No exceptions are raised by this function.
     """
     if not frames:
         return []
@@ -276,15 +328,18 @@ def create_bundles(
     roi: ROIMetadata,
     config: PreprocessConfig,
 ) -> list[FrameBundle]:
-    """Group filtered frames into bundles for downstream analysis.
-
-    Args:
-        gated_frames: Frames retained after SSIM gating.
-        roi: Region of interest metadata applied to the frames.
-        config: Preprocessing configuration controlling bundle sizes.
-
+    """
+    Group a sequence of SSIM-gated frames into ordered FrameBundle objects according to size and time-gap constraints.
+    
+    Given a list of retained frames (index, timestamp_sec, frame), this function accumulates contiguous frames into bundles and emits a FrameBundle whenever the current bundle reaches config.bundle_max_frames or the time gap between consecutive frames exceeds config.bundle_max_time_gap_sec. Each returned bundle contains the bundled frames, their original frame indices and timestamps, and the provided ROI metadata.
+    
+    Parameters:
+        gated_frames (list[tuple[int, float, FrameArray]]): Sequence of retained frames as (frame_index, timestamp_sec, frame). Frames are processed in list order; an empty list yields an empty result.
+        roi (ROIMetadata): Region-of-interest metadata associated with all frames in the bundles.
+        config (PreprocessConfig): Configuration that controls bundling via `bundle_max_frames` and `bundle_max_time_gap_sec`.
+    
     Returns:
-        Ordered bundles of frames respecting size and temporal constraints.
+        list[FrameBundle]: Ordered list of FrameBundle objects covering the input frames. Each bundle has at least one frame and preserves the original ordering and timestamps.
     """
     if not gated_frames:
         return []
@@ -329,19 +384,26 @@ def create_bundles(
 
 
 def preprocess_video(video_path: Path, config: PreprocessConfig | None = None) -> list[FrameBundle]:
-    """Run the full preprocessing pipeline for a screenshare video.
-
+    """
+    Preprocess a screenshare video into ROI-focused, time-ordered frame bundles.
+    
+    Orchestrates the end-to-end pipeline: detect the primary region of interest (ROI), sample and crop frames at the configured frame rate, filter frames by structural similarity changes, and group the resulting frames into time-bounded bundles.
+    
     Args:
-        video_path: Path to the input video.
-        config: Optional preprocessing configuration. Defaults to
-            ``PreprocessConfig()`` when omitted.
-
+        video_path (Path): Path to the input video file; must exist and be readable.
+        config (PreprocessConfig | None): Optional preprocessing configuration; when omitted, a default PreprocessConfig() is used to control sampling rate, ROI detection duration, SSIM threshold, and bundling constraints.
+    
     Returns:
-        Frame bundles resulting from ROI detection, frame extraction, gating, and
-        grouping.
-
+        list[FrameBundle]: A list of FrameBundle objects produced by the pipeline. Returns an empty list if no frames pass SSIM gating.
+    
     Raises:
-        PreprocessingError: If any preprocessing stage fails.
+        PreprocessingError: If any stage of preprocessing fails (for example, video cannot be opened, ROI detection fails, ROI is out of frame bounds, or frame extraction yields no frames).
+    
+    Side effects:
+        Opens the video file(s) for reading and releases associated resources before returning.
+    
+    Concurrency:
+        Stateless and does not rely on shared mutable module-level state; safe to call concurrently from multiple threads or processes.
     """
     cfg = config or PreprocessConfig()
     roi = detect_roi(video_path, cfg)
@@ -353,13 +415,21 @@ def preprocess_video(video_path: Path, config: PreprocessConfig | None = None) -
 
 
 def build_frame_time_mapping(bundles: list[FrameBundle]) -> str:
-    """Build a human-friendly mapping of frame indices to timestamps.
-
-    Args:
-        bundles: Frame bundles produced by ``preprocess_video``.
-
+    """
+    Produce a human-readable mapping of frame indices to their timestamps across provided bundles.
+    
+    Parameters:
+        bundles (list[FrameBundle]): Sequence of FrameBundle objects whose `frame_indices` and `timestamps_sec`
+            will be flattened and mapped. Bundles may overlap in frame indices; mapping lines are sorted by frame index.
+    
     Returns:
-        A string mapping frame indices to timestamps, sorted by frame index.
+        str: A multi-line string beginning with "Frame→Time (s):" and followed by lines of the form
+            "<frame_index> -> <timestamp>" where timestamps are formatted with three decimal places.
+    
+    Notes:
+        - The function has no side effects and is safe to call concurrently.
+        - It assumes each FrameBundle's `frame_indices` and `timestamps_sec` are aligned (equal lengths), as enforced
+          by the FrameBundle class.
     """
     mapping: list[tuple[int, float]] = []
     for bundle in bundles:
@@ -375,7 +445,15 @@ def build_frame_time_mapping(bundles: list[FrameBundle]) -> str:
 
 
 def _to_gray(frame: FrameArray) -> FrameArray:
-    """Convert an image to grayscale if it is not already."""
+    """
+    Convert a video frame to a 2D grayscale image.
+    
+    Parameters:
+        frame (FrameArray): Input image. If `frame.ndim == 2` it is treated as already grayscale; otherwise it is expected to be a BGR color image.
+    
+    Returns:
+        FrameArray: A 2-dimensional grayscale image (same dtype as input). If the input was already grayscale, the same array is returned unchanged.
+    """
     if frame.ndim == GRAYSCALE_DIMENSION:
         return frame
     return cast(FrameArray, cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))

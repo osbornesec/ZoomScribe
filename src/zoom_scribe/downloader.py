@@ -33,7 +33,17 @@ PostDownloadHook = Callable[[Path, "Recording", "RecordingFile"], None]
 
 
 def _sanitize(value: str) -> str:
-    """Sanitize a path component so it is safe to use on local filesystems."""
+    """
+    Create a filesystem-safe single path component from an input string.
+    
+    Replaces characters that are not allowed in the module's sanitized name set with underscores, collapses runs of three or more underscores to two underscores, and converts a string composed solely of dots to a single underscore. If the input is empty or the result is empty after sanitization, returns "unknown".
+    
+    Parameters:
+        value (str): The input string to sanitize.
+    
+    Returns:
+        str: A sanitized path component safe for use on filesystems.
+    """
     sanitized = _SANITIZE_PATTERN.sub("_", value or "")
     if sanitized and set(sanitized) <= {"."}:
         sanitized = "_"
@@ -92,16 +102,35 @@ class RecordingDownloader:
         overwrite: bool = False,
         post_download: PostDownloadHook | None = None,
     ) -> None:
-        """Download the supplied recordings into ``target_dir`` respecting flags.
-
-        Args:
-            recordings: Collection of meeting recordings to persist.
-            target_dir: Root directory used for on-disk storage.
-            dry_run: When ``True`` no files are written, only progress is logged.
-            overwrite: When ``True`` existing files are replaced with freshly
-                downloaded data.
-            post_download: Optional callback invoked after each recording file is
-                processed (including skips). Not executed during dry runs.
+        """
+        Download the provided recordings into a filesystem tree rooted at `target_dir`.
+        
+        Parameters:
+            recordings (Sequence[Recording]): Iterable of recordings to persist; each recording's
+                .recording_files sequence will be processed.
+            target_dir (str | Path): Root directory under which files will be placed.
+            dry_run (bool): If True, no files are written; progress events are logged for each
+                would-be destination.
+            overwrite (bool): If True, existing files at a destination will be replaced.
+            post_download (PostDownloadHook | None): Optional callback invoked after each
+                recording file is processed (including when a file is skipped due to
+                existing content). The hook is called from worker threads and is not invoked
+                during dry runs.
+        
+        Side effects:
+            - Writes files to disk using atomic ".part" temporary files and then renames them
+              into place.
+            - Creates parent directories as needed.
+            - Emits structured progress logs.
+            - Executes `post_download` concurrently from worker threads when provided.
+        
+        Concurrency:
+            Downloads are performed using a ThreadPoolExecutor with `self.max_workers` workers;
+            failures cancel remaining in-flight tasks.
+        
+        Raises:
+            DownloadError: If any recording file fails to download or persist; the exception
+            message will include the failing recording_file.id.
         """
         if dry_run:
             for recording in recordings:
@@ -148,7 +177,30 @@ class RecordingDownloader:
         overwrite: bool,
         post_download: PostDownloadHook | None,
     ) -> Path:
-        """Download a single recording file atomically to ``destination``."""
+        """
+        Write a single recording file to `destination` using an atomic write (temporary “.part” file) and invoke an optional post-download hook.
+        
+        Parameters:
+            recording (Recording): Recording metadata used for logging and hook context.
+            recording_file (RecordingFile): File metadata and remote location used to fetch contents.
+            destination (Path): Final on-disk path for the file; parent directories will be created if needed.
+            overwrite (bool): If False and `destination` already exists, the file is skipped and treated as successful.
+            post_download (PostDownloadHook | None): Optional callable invoked after the file is processed; exceptions raised by the hook are caught and not propagated.
+        
+        Returns:
+            Path: The final destination path (existing or newly written).
+        
+        Side effects and behavior:
+            - Creates destination.parent if it does not exist.
+            - Writes to a temporary file (destination + ".part") and atomically replaces `destination` on success.
+            - If `destination` exists and `overwrite` is False, the file is not downloaded; the post-download hook is still invoked.
+            - On error during download or write, the temporary file is removed when possible and the original exception is re-raised.
+            - The method logs progress events for skip, download, and overwrite.
+        
+        Preconditions and concurrency:
+            - Caller should ensure the target filesystem is writable and has sufficient space.
+            - Concurrent invocations targeting the same `destination` may race; atomic replacement avoids partial writes but callers should coordinate to avoid lost updates.
+        """
         existed_before = destination.exists()
         if existed_before and not overwrite:
             self._log_progress("skip_existing", destination, recording, recording_file)
@@ -184,7 +236,21 @@ class RecordingDownloader:
         recording: Recording,
         recording_file: RecordingFile,
     ) -> None:
-        """Invoke ``hook`` and suppress exceptions with logging."""
+        """
+        Call the provided post-download hook for a recording file, logging and suppressing any exception it raises.
+        
+        If `hook` is None this is a no-op. If `hook` raises an exception, the exception is caught and an error is logged with contextual, redacted identifiers (destination path, recording id, recording_file id); the exception is not propagated.
+        
+        Parameters:
+            hook (PostDownloadHook | None): Callable invoked with (destination, recording, recording_file) or None to skip.
+            destination (Path): Final file path passed to the hook.
+            recording (Recording): Recording metadata associated with the file.
+            recording_file (RecordingFile): Metadata for the specific recording file.
+        
+        Side effects:
+            - Executes `hook` synchronously on the current thread.
+            - On hook failure, emits a structured log entry and continues without raising.
+        """
         if hook is None:
             return
         try:
@@ -200,7 +266,17 @@ class RecordingDownloader:
             )
 
     def _download_contents(self, recording_file: RecordingFile) -> Iterable[bytes]:
-        """Yield the binary payload for ``recording_file`` in chunks."""
+        """
+        Retrieve and yield binary chunks for a recording file's payload.
+        
+        Requests the recording payload from the configured client and yields normalized bytes chunks that represent the file content.
+        
+        Parameters:
+            recording_file (RecordingFile): Metadata for the recording file used to locate and access the remote asset.
+        
+        Returns:
+            Iterable[bytes]: An iterator that yields successive byte chunks of the recording file.
+        """
         download_file = getattr(self.client, "download_file", None)
         if callable(download_file):
             data = download_file(
