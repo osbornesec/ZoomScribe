@@ -364,9 +364,18 @@ class ZoomAPIClient:
                 status_code=response.status_code,
                 details=location,
             )
-        content = [chunk for chunk in response.iter_content(chunk_size=64 * 1024) if chunk]
-        response.close()
+        # Read streamed content in a way that always closes the response on error
+        content: list[bytes] = []
+        try:
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    content.append(chunk)
+        finally:
+            response.close()
+
         self.logger.debug(
+            "Downloaded %d bytes from %s", sum(len(c) for c in content), request_url
+        )
             "zoom.download_file.success",
             extra={
                 "bytes": sum(len(chunk) for chunk in content),
