@@ -372,3 +372,116 @@ def test_ensure_access_token_raises_when_expired_without_credentials():
 
     with pytest.raises(RuntimeError):
         client._ensure_access_token()
+
+
+def test_download_file_rejects_non_zoom_host():
+    """Ensure download_file refuses non-Zoom domains (SSRF protection)."""
+
+    class DownloadSession:
+        def get(self, *args, **kwargs):
+            raise AssertionError("get should not be called for non-Zoom host")
+
+        def request(self, *args, **kwargs):
+            raise AssertionError("request should not be called for non-Zoom")
+
+    session = DownloadSession()
+    client = ZoomAPIClient(
+        account_id="account",
+        client_id="id",
+        client_secret="secret",
+        session=cast(requests.Session, session),
+        access_token="token-123",
+    )
+
+    # Test various non-Zoom hosts
+    bad_hosts = [
+        "https://evil.com/file.mp4",
+        "https://zoom.us.attacker.com/file.mp4",
+        "https://notzoom.us/file.mp4",
+        "http://example.com/file.mp4",
+        "https://api.zoom.us.evil.com/recording",
+    ]
+
+    for url in bad_hosts:
+        with pytest.raises(ValueError, match="Refusing to download from non-Zoom host"):
+            client.download_file(url=url)
+
+
+def test_download_file_allows_zoom_hosts():
+    """Ensure download_file accepts valid Zoom domains."""
+
+    class DownloadSession:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, headers=None, stream=False, **kwargs):
+            self.calls.append((url, headers, stream, kwargs))
+
+            class Response:
+                status_code = 200
+
+                def raise_for_status(self):
+                    return None
+
+                @property
+                def content(self):
+                    return b"test-content"
+
+                def close(self):
+                    pass
+
+                def iter_content(self, chunk_size=None):
+                    yield b"test-content"
+
+            return Response()
+
+        def request(self, *args, **kwargs):
+            raise AssertionError("request should not be called in this test")
+
+    session = DownloadSession()
+    client = ZoomAPIClient(
+        account_id="account",
+        client_id="id",
+        client_secret="secret",
+        session=cast(requests.Session, session),
+        access_token="token-123",
+    )
+
+    # Test various valid Zoom hosts
+    valid_hosts = [
+        "https://zoom.us/rec/download/file.mp4",
+        "https://api.zoom.us/v2/recordings/download",
+        "https://us01web.zoom.us/rec/download/file.mp4",
+        "https://subdomain.zoom.us/recording/file.mp4",
+    ]
+
+    for url in valid_hosts:
+        content = client.download_file(url=url)
+        assert content == b"test-content"
+        assert len(session.calls) > 0
+
+
+def test_download_file_with_access_token_validates_host():
+    """Ensure host validation happens even when access_token is provided."""
+
+    class DownloadSession:
+        def get(self, *args, **kwargs):
+            raise AssertionError("Session.get should not be called")
+
+        def request(self, *args, **kwargs):
+            raise AssertionError("Session.request should not be called")
+
+    session = DownloadSession()
+    client = ZoomAPIClient(
+        account_id="account",
+        client_id="id",
+        client_secret="secret",
+        session=cast(requests.Session, session),
+        access_token="token-123",
+    )
+
+    # Even with access_token in URL, non-Zoom hosts should be rejected
+    with pytest.raises(ValueError, match="Refusing to download from non-Zoom host"):
+        client.download_file(
+            url="https://evil.com/file.mp4", access_token="secret-token"
+        )
