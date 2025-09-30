@@ -1,3 +1,5 @@
+import time
+from threading import Lock
 from unittest.mock import Mock
 
 import pytest
@@ -122,3 +124,56 @@ def test_download_cleans_temp_on_failure(tmp_path, monkeypatch, sample_recording
 @pytest.mark.parametrize("value", [".", "..", "...", "...."])
 def test_sanitize_replaces_dot_only_values(value):
     assert _sanitize(value) == "_"
+
+
+def test_concurrent_downloads_are_thread_safe(tmp_path):
+    """Ensure multiple files can be downloaded concurrently without race conditions."""
+    call_count = 0
+    call_lock = Lock()
+
+    # Create a mock client that simulates concurrent downloads with shared state
+    client = Mock()
+
+    def download_with_delay(*args, **kwargs):
+        nonlocal call_count
+        with call_lock:
+            call_count += 1
+        # Simulate network delay to increase chance of race conditions
+        time.sleep(0.01)
+        return b"data"
+
+    client.download_file.side_effect = download_with_delay
+
+    # Create multiple recordings to download in parallel
+    recordings = []
+    for i in range(5):
+        payload = {
+            "uuid": f"uuid-{i}",
+            "topic": f"Meeting {i}",
+            "host_email": "host@example.com",
+            "start_time": "2025-09-28T10:00:00Z",
+            "recording_files": [
+                {
+                    "id": f"file-{i}",
+                    "file_type": "MP4",
+                    "file_extension": "mp4",
+                    "download_url": f"https://zoom.us/download/file-{i}",
+                    "download_access_token": "token",
+                }
+            ],
+        }
+        recordings.append(Recording.from_api(payload))
+
+    downloader = RecordingDownloader(client, max_workers=3)
+    downloader.download(recordings, tmp_path, dry_run=False, overwrite=False)
+
+    # Verify all files were downloaded
+    assert call_count == 5
+    assert client.download_file.call_count == 5
+
+    # Verify all files exist on disk
+    for recording in recordings:
+        recording_file = recording.recording_files[0]
+        destination = downloader.build_file_path(recording, recording_file, tmp_path)
+        assert destination.exists()
+        assert destination.read_bytes() == b"data"
