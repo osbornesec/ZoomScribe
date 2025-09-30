@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from zoom_scribe.main import cli
+from zoom_scribe.screenshare.preprocess import PreprocessingError
 
 
 def test_cli_invokes_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,7 +25,7 @@ def test_cli_invokes_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--dry-run"])
+    result = runner.invoke(cli, ["download", "--dry-run"])
 
     assert result.exit_code == 0
     client.list_recordings.assert_called_once()
@@ -32,6 +33,7 @@ def test_cli_invokes_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
     _args, kwargs = downloader.download.call_args
     assert kwargs["dry_run"] is True
     assert kwargs["overwrite"] is False
+    assert kwargs["post_download"] is None
 
 
 def test_cli_passes_date_filters(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,7 +63,10 @@ def test_cli_passes_date_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--from", "2025-09-01", "--to", "2025-09-15"])
+    result = runner.invoke(
+        cli,
+        ["download", "--from", "2025-09-01", "--to", "2025-09-15"],
+    )
 
     assert result.exit_code == 0
     assert client_instance.calls
@@ -82,10 +87,11 @@ def test_cli_overwrite_option(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--overwrite"])
+    result = runner.invoke(cli, ["download", "--overwrite"])
 
     assert result.exit_code == 0
     assert downloader.download.call_args[1]["overwrite"] is True
+    assert downloader.download.call_args[1]["post_download"] is None
 
 
 def test_cli_configures_logging(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,17 +116,16 @@ def test_cli_configures_logging(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
     result = runner.invoke(
         cli,
-        ["--dry-run", "--log-level", "DEBUG", "--log-format", "json"],
+        ["download", "--dry-run", "--log-level", "DEBUG", "--log-format", "json"],
     )
 
     assert result.exit_code == 0
     assert captured["level"].lower() == "debug"
     assert captured["format"].lower() == "json"
+    assert downloader.download.call_args[1]["post_download"] is None
 
 
-def test_cli_rejects_file_target_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_rejects_file_target_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     file_path = tmp_path / "existing.txt"
     file_path.write_text("content", encoding="utf-8")
 
@@ -135,7 +140,82 @@ def test_cli_rejects_file_target_dir(
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--target-dir", str(file_path)])
+    result = runner.invoke(cli, ["download", "--target-dir", str(file_path)])
 
     assert result.exit_code != 0
     assert "Target path exists" in result.output
+
+
+def test_cli_enables_screenshare_preprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = Mock()
+    client.list_recordings.return_value = []
+    downloader = Mock()
+
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda: client)
+    monkeypatch.setattr(
+        "zoom_scribe.main.create_downloader",
+        lambda _client, **_kwargs: downloader,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["download", "--screenshare-preprocess", "--screenshare-output-dir", "out"],
+    )
+
+    assert result.exit_code == 0
+    _, kwargs = downloader.download.call_args
+    hook = kwargs["post_download"]
+    assert callable(hook)
+
+
+def test_screenshare_preprocess_command_writes_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"data")
+
+    def fake_preprocess(path: Path, _config: Any) -> list[Any]:
+        assert path == video
+        return []
+
+    monkeypatch.setattr("zoom_scribe.main.preprocess_video", fake_preprocess)
+    monkeypatch.setattr(
+        "zoom_scribe.main.build_frame_time_mapping",
+        lambda _bundles: "Frame→Time (s):\n1 -> 0.100",
+    )
+
+    runner = CliRunner()
+    mapping_path = tmp_path / "mapping.txt"
+    result = runner.invoke(
+        cli,
+        [
+            "screenshare",
+            "preprocess",
+            str(video),
+            "--output",
+            str(mapping_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert mapping_path.exists()
+    assert "Frame mapping written" in result.output
+
+
+def test_screenshare_preprocess_command_handles_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"data")
+
+    def raise_error(*_args: Any, **_kwargs: Any) -> list[Any]:
+        raise PreprocessingError("failed")
+
+    monkeypatch.setattr("zoom_scribe.main.preprocess_video", raise_error)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["screenshare", "preprocess", str(video)])
+
+    assert result.exit_code != 0
+    assert "failed" in result.output

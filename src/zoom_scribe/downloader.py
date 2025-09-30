@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import IO, Any, Protocol, runtime_checkable
@@ -27,6 +27,9 @@ class _Readable(Protocol):
 
 class DownloadError(RuntimeError):
     """Raised when a recording asset fails to download or persist."""
+
+
+PostDownloadHook = Callable[[Path, "Recording", "RecordingFile"], None]
 
 
 def _sanitize(value: str) -> str:
@@ -87,8 +90,19 @@ class RecordingDownloader:
         *,
         dry_run: bool = False,
         overwrite: bool = False,
+        post_download: PostDownloadHook | None = None,
     ) -> None:
-        """Download the supplied recordings into ``target_dir`` respecting flags."""
+        """Download the supplied recordings into ``target_dir`` respecting flags.
+
+        Args:
+            recordings: Collection of meeting recordings to persist.
+            target_dir: Root directory used for on-disk storage.
+            dry_run: When ``True`` no files are written, only progress is logged.
+            overwrite: When ``True`` existing files are replaced with freshly
+                downloaded data.
+            post_download: Optional callback invoked after each recording file is
+                processed (including skips). Not executed during dry runs.
+        """
         if dry_run:
             for recording in recordings:
                 for recording_file in recording.recording_files:
@@ -112,6 +126,7 @@ class RecordingDownloader:
                         recording_file,
                         destination,
                         overwrite,
+                        post_download,
                     )
                     futures[future] = (recording, recording_file, destination)
 
@@ -131,11 +146,13 @@ class RecordingDownloader:
         recording_file: RecordingFile,
         destination: Path,
         overwrite: bool,
+        post_download: PostDownloadHook | None,
     ) -> Path:
         """Download a single recording file atomically to ``destination``."""
         existed_before = destination.exists()
         if existed_before and not overwrite:
             self._log_progress("skip_existing", destination, recording, recording_file)
+            self._invoke_post_download(post_download, destination, recording, recording_file)
             return destination
 
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -157,7 +174,30 @@ class RecordingDownloader:
 
         event = "overwritten" if existed_before else "downloaded"
         self._log_progress(event, destination, recording, recording_file)
+        self._invoke_post_download(post_download, destination, recording, recording_file)
         return destination
+
+    def _invoke_post_download(
+        self,
+        hook: PostDownloadHook | None,
+        destination: Path,
+        recording: Recording,
+        recording_file: RecordingFile,
+    ) -> None:
+        """Invoke ``hook`` and suppress exceptions with logging."""
+        if hook is None:
+            return
+        try:
+            hook(destination, recording, recording_file)
+        except Exception:  # pragma: no cover - defensive logging path
+            self.logger.exception(
+                "screenshare.post_download_failed",
+                extra={
+                    "destination": str(destination),
+                    "recording_id": redact_identifier(recording.uuid),
+                    "recording_file_id": redact_identifier(recording_file.id),
+                },
+            )
 
     def _download_contents(self, recording_file: RecordingFile) -> Iterable[bytes]:
         """Yield the binary payload for ``recording_file`` in chunks."""

@@ -78,9 +78,7 @@ def test_download_skips_existing_file_without_overwrite(
     assert destination.read_bytes() == b"existing"
 
 
-def test_download_overwrites_when_requested(
-    tmp_path: Path, sample_recording: Recording
-) -> None:
+def test_download_overwrites_when_requested(tmp_path: Path, sample_recording: Recording) -> None:
     client = Mock()
     client.download_file.return_value = b"new-data"
     downloader = RecordingDownloader(client, max_workers=1)
@@ -100,12 +98,25 @@ def test_download_in_dry_run_mode(tmp_path: Path, sample_recording: Recording) -
     client = Mock()
     downloader = RecordingDownloader(client, max_workers=1)
 
-    downloader.download([sample_recording], tmp_path, dry_run=True, overwrite=False)
+    hook_called = False
+
+    def hook(*_args: Any) -> None:
+        nonlocal hook_called
+        hook_called = True
+
+    downloader.download(
+        [sample_recording],
+        tmp_path,
+        dry_run=True,
+        overwrite=False,
+        post_download=hook,
+    )
 
     client.download_file.assert_not_called()
     recording_file = sample_recording.recording_files[0]
     destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
     assert not destination.exists()
+    assert hook_called is False
 
 
 def test_download_cleans_temp_on_failure(
@@ -189,3 +200,26 @@ def test_concurrent_downloads_are_thread_safe(tmp_path: Path) -> None:
         destination = downloader.build_file_path(recording, recording_file, tmp_path)
         assert destination.exists()
         assert destination.read_bytes() == b"data"
+
+
+def test_download_invokes_post_download_hook(tmp_path: Path, sample_recording: Recording) -> None:
+    client = Mock()
+    client.download_file.return_value = b"binary-data"
+    downloader = RecordingDownloader(client, max_workers=1)
+    calls: list[Path] = []
+
+    def hook(path: Path, *_args: Any) -> None:
+        calls.append(path)
+
+    downloader.download(
+        [sample_recording],
+        tmp_path,
+        dry_run=False,
+        overwrite=False,
+        post_download=hook,
+    )
+
+    assert calls
+    recording_file = sample_recording.recording_files[0]
+    expected_path = downloader.build_file_path(sample_recording, recording_file, tmp_path)
+    assert calls[0] == expected_path

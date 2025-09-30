@@ -393,8 +393,7 @@ def test_concurrent_client_access_is_thread_safe() -> None:
 
     # Start multiple threads that access the client simultaneously
     threads: list[threading.Thread] = [
-        threading.Thread(target=access_token_concurrently)
-        for _ in range(10)
+        threading.Thread(target=access_token_concurrently) for _ in range(10)
     ]
     for thread in threads:
         thread.start()

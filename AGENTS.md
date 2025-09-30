@@ -31,3 +31,6 @@
 - Keep Zoom credentials in `.env` only; never commit secrets.
 - Server-to-server OAuth scopes needed: `recording:read:admin` and `meeting:read:admin`.
 - Use dry-run mode to validate filters before downloading sensitive assets.
+
+## Automation & Review
+- At the end of each change cycle, run `coderabbit review --base master --prompt-only -t all` (allow up to 15 minutes) and address the reported findings.
