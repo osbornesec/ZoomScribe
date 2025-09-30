@@ -357,13 +357,20 @@ class ZoomAPIClient:
             allow_redirects=False,
         )
         if HTTP_STATUS_MULTIPLE_CHOICES <= response.status_code < HTTP_STATUS_BAD_REQUEST:
-            location = response.headers.get("Location")
-            response.close()
-            raise ZoomAPIError(
-                "Zoom download responded with redirect; refusing to follow",
-                status_code=response.status_code,
+             # Redact sensitive query parameters from Location before attaching to error details
+            location_raw = response.headers.get("Location")
+            # Redact query to avoid leaking tokens in logs/errors
+            try:
+                parsed = urlparse(location_raw) if location_raw else None
+                location = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed else None
+            except Exception:
+                location = None
+             response.close()
+             raise ZoomAPIError(
+                 "Zoom download responded with redirect; refusing to follow",
+                 status_code=response.status_code,
                 details=location,
-            )
+             )
         # Read streamed content in a way that always closes the response on error
         content: list[bytes] = []
         try:
