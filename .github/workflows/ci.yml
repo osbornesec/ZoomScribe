@@ -49,11 +49,17 @@ jobs:
       - name: ShellCheck
         run: |
           set -euo pipefail
-          files=$(git ls-files '*.sh')
-          if [ -n "$files" ]; then shellcheck $files; else echo "No shell scripts to lint"; fi
+          if git ls-files -z '*.sh' | grep -qz .; then
+            git ls-files -z '*.sh' | xargs -0 shellcheck
+          else
+            echo "No shell scripts to lint"
+          fi
 
       - name: shfmt
         run: |
           set -euo pipefail
-          files=$(git ls-files '*.sh')
-          if [ -n "$files" ]; then shfmt -d -i 4 -ci -sr $files; else echo "No shell scripts to format"; fi
+          if git ls-files -z '*.sh' | grep -qz .; then
+            git ls-files -z '*.sh' | xargs -0 shfmt -d -i 4 -ci -sr
+          else
+            echo "No shell scripts to format"
+          fi
