@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any, Final, cast
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 
 import requests
 
@@ -342,14 +342,9 @@ class ZoomAPIClient:
         effective_timeout = self.timeout if timeout is None else self._validate_timeout(timeout)
 
         # Enforce Zoom host allowlist to reduce SSRF risk when URLs come from the API.
-        try:
-            from urllib.parse import urlparse  # local import keeps top-level tidy
-        except ImportError:  # pragma: no cover - standard library guard
-            urlparse = None
-        if urlparse is not None:
-            host = (urlparse(request_url).hostname or "").lower()
-            if host not in {"zoom.us"} and not host.endswith(".zoom.us"):
-                raise ValueError(f"Refusing to download from non-Zoom host: {host}")
+        host = (urlparse(request_url).hostname or "").lower()
+        if host not in {"zoom.us"} and not host.endswith(".zoom.us"):
+            raise ValueError(f"Refusing to download from non-Zoom host: {host}")
 
         response = self._request(
             "GET",
@@ -358,7 +353,16 @@ class ZoomAPIClient:
             stream=True,
             include_authorization=True,
             extra_headers={"Accept": "*/*", "Content-Type": None},
+            allow_redirects=False,
         )
+        if 300 <= response.status_code < 400:
+            location = response.headers.get("Location")
+            response.close()
+            raise ZoomAPIError(
+                "Zoom download responded with redirect; refusing to follow",
+                status_code=response.status_code,
+                details=location,
+            )
         content = [chunk for chunk in response.iter_content(chunk_size=64 * 1024) if chunk]
         response.close()
         self.logger.debug(
@@ -386,6 +390,7 @@ class ZoomAPIClient:
         stream: bool = False,
         include_authorization: bool = True,
         extra_headers: Mapping[str, Any] | None = None,
+        allow_redirects: bool = True,
     ) -> requests.Response:
         """Send an HTTP request with Zoom-specific retry and error handling."""
         self._ensure_access_token()
@@ -420,6 +425,7 @@ class ZoomAPIClient:
                 headers=headers,
                 timeout=effective_timeout,
                 stream=stream,
+                allow_redirects=allow_redirects,
             )
             status_code = response.status_code
             request_id = response.headers.get(REQUEST_ID_HEADER)
