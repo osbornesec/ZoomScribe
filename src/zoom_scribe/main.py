@@ -54,7 +54,10 @@ class JsonFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in RESERVED_LOG_RECORD_ATTRS or key.startswith("_"):
                 continue
-            payload[key] = value
+            if key in {"host_email", "meeting_id", "meeting_topic", "recording_uuid", "recording_file_id"}:
+                payload[key] = redact_identifier(str(value))
+            else:
+                payload[key] = value
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
         return json.dumps(payload, default=str, ensure_ascii=False)
