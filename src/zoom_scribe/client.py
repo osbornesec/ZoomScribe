@@ -25,6 +25,7 @@ RATE_LIMIT_TYPE_HEADER: Final = "x-ratelimit-type"
 RATE_LIMIT_REMAINING_HEADER: Final = "x-ratelimit-remaining"
 DEFAULT_TIMEOUT: Final[float] = 10.0
 RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
+HTTP_STATUS_MULTIPLE_CHOICES: Final[int] = 300
 HTTP_STATUS_BAD_REQUEST: Final[int] = 400
 HTTP_STATUS_UNAUTHORIZED: Final[int] = 401
 HTTP_STATUS_NOT_FOUND: Final[int] = 404
@@ -355,7 +356,7 @@ class ZoomAPIClient:
             extra_headers={"Accept": "*/*", "Content-Type": None},
             allow_redirects=False,
         )
-        if 300 <= response.status_code < 400:
+        if HTTP_STATUS_MULTIPLE_CHOICES <= response.status_code < HTTP_STATUS_BAD_REQUEST:
             location = response.headers.get("Location")
             response.close()
             raise ZoomAPIError(
