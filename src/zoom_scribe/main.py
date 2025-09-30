@@ -197,13 +197,10 @@ def cli(  # noqa: PLR0913
     configure_logging(log_level, log_format)
     logger = logging.getLogger("zoom_scribe.cli")
 
-    if from_date and from_date.tzinfo is None:
-        from_date = from_date.replace(tzinfo=UTC)
-    if to_date and to_date.tzinfo is None:
-        to_date = to_date.replace(tzinfo=UTC)
-
-    from_date_utc = ensure_utc(from_date) if from_date else None
-    to_date_utc = ensure_utc(to_date) if to_date else None
+    from_date_utc = (
+        ensure_utc(from_date, assume_utc_if_naive=True) if from_date else None
+    )
+    to_date_utc = ensure_utc(to_date, assume_utc_if_naive=True) if to_date else None
 
     end = to_date_utc or datetime.now(UTC)
     start = from_date_utc or (end - timedelta(days=30))

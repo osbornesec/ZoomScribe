@@ -1,13 +1,17 @@
 import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
+import pytest
 from click.testing import CliRunner
 
 from zoom_scribe.main import cli
 
 
-def test_cli_invokes_dry_run(monkeypatch):
-    recordings = ["recording"]
+def test_cli_invokes_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    recordings: list[str] = ["recording"]
 
     client = Mock()
     client.list_recordings.return_value = recordings
@@ -16,7 +20,7 @@ def test_cli_invokes_dry_run(monkeypatch):
     monkeypatch.setattr("zoom_scribe.main.create_client", lambda: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda client, logger=None: downloader,
+        lambda _client, **_kwargs: downloader,
     )
 
     runner = CliRunner()
@@ -30,12 +34,19 @@ def test_cli_invokes_dry_run(monkeypatch):
     assert kwargs["overwrite"] is False
 
 
-def test_cli_passes_date_filters(monkeypatch):
+def test_cli_passes_date_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeClient:
-        def __init__(self):
-            self.calls = []
+        def __init__(self) -> None:
+            self.calls: list[tuple[datetime, datetime, str | None, str | None]] = []
 
-        def list_recordings(self, *, start, end, host_email=None, meeting_id=None):
+        def list_recordings(
+            self,
+            *,
+            start: datetime,
+            end: datetime,
+            host_email: str | None = None,
+            meeting_id: str | None = None,
+        ) -> list[str]:
             self.calls.append((start, end, host_email, meeting_id))
             return []
 
@@ -46,7 +57,7 @@ def test_cli_passes_date_filters(monkeypatch):
     monkeypatch.setattr("zoom_scribe.main.create_client", lambda: client_instance)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda client, logger=None: downloader,
+        lambda _client, **_kwargs: downloader,
     )
 
     runner = CliRunner()
@@ -59,7 +70,7 @@ def test_cli_passes_date_filters(monkeypatch):
     assert end.year == 2025 and end.day == 15
 
 
-def test_cli_overwrite_option(monkeypatch):
+def test_cli_overwrite_option(monkeypatch: pytest.MonkeyPatch) -> None:
     client = Mock()
     client.list_recordings.return_value = []
     downloader = Mock()
@@ -67,7 +78,7 @@ def test_cli_overwrite_option(monkeypatch):
     monkeypatch.setattr("zoom_scribe.main.create_client", lambda: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda client, logger=None: downloader,
+        lambda _client, **_kwargs: downloader,
     )
 
     runner = CliRunner()
@@ -77,7 +88,7 @@ def test_cli_overwrite_option(monkeypatch):
     assert downloader.download.call_args[1]["overwrite"] is True
 
 
-def test_cli_configures_logging(monkeypatch):
+def test_cli_configures_logging(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, str] = {}
 
     def fake_configure(level: str, fmt: str) -> logging.Logger:
@@ -93,7 +104,7 @@ def test_cli_configures_logging(monkeypatch):
     monkeypatch.setattr("zoom_scribe.main.create_client", lambda: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda client, logger=None: downloader,
+        lambda _client, **_kwargs: downloader,
     )
 
     runner = CliRunner()
@@ -107,18 +118,20 @@ def test_cli_configures_logging(monkeypatch):
     assert captured["format"].lower() == "json"
 
 
-def test_cli_rejects_file_target_dir(tmp_path, monkeypatch):
+def test_cli_rejects_file_target_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     file_path = tmp_path / "existing.txt"
     file_path.write_text("content", encoding="utf-8")
 
-    def fake_logging(*args, **kwargs):
+    def fake_logging(*_args: Any, **_kwargs: Any) -> logging.Logger:
         return logging.getLogger("zoom_scribe.test")
 
     monkeypatch.setattr("zoom_scribe.main.configure_logging", fake_logging)
     monkeypatch.setattr("zoom_scribe.main.create_client", lambda: Mock())
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda client, logger=None: Mock(),
+        lambda _client, **_kwargs: Mock(),
     )
 
     runner = CliRunner()

@@ -144,12 +144,12 @@ class RecordingDownloader:
             temp_path.unlink()
 
         try:
-            with open(temp_path, "wb") as temp_file:
+            with temp_path.open("wb") as temp_file:
                 for chunk in self._download_contents(recording_file):
                     temp_file.write(chunk)
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
-            os.replace(temp_path, destination)
+            temp_path.replace(destination)
         except Exception:
             with contextlib.suppress(FileNotFoundError):
                 temp_path.unlink()

@@ -95,7 +95,18 @@ class TokenRefreshError(RuntimeError):
 
 
 def load_env_credentials(dotenv_path: str | None = None) -> dict[str, str]:
-    """Load Zoom OAuth credentials from the environment into a plain dictionary."""
+    """Return Zoom OAuth credentials sourced from the environment.
+
+    Args:
+        dotenv_path: Optional path to a ``.env`` file to load before reading environment
+            variables.
+
+    Returns:
+        Dictionary mapping OAuth credential keys (e.g., ``ZOOM_ACCOUNT_ID``) to their values.
+
+    Raises:
+        MissingCredentialsError: If any required credential is absent.
+    """
     try:
         credentials = load_oauth_credentials(dotenv_path=dotenv_path)
     except ConfigurationError as exc:  # pragma: no cover - translated in tests

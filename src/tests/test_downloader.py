@@ -1,5 +1,7 @@
 import time
+from pathlib import Path
 from threading import Lock
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -9,8 +11,8 @@ from zoom_scribe.models import Recording
 
 
 @pytest.fixture
-def sample_recording():
-    payload = {
+def sample_recording() -> Recording:
+    payload: dict[str, Any] = {
         "uuid": "uuid-1",
         "topic": "Project / Kickoff?",
         "host_email": "host@example.com",
@@ -28,7 +30,7 @@ def sample_recording():
     return Recording.from_api(payload)
 
 
-def test_build_file_path_sanitizes_components(sample_recording):
+def test_build_file_path_sanitizes_components(sample_recording: Recording) -> None:
     downloader = RecordingDownloader(Mock())
     recording_file = sample_recording.recording_files[0]
 
@@ -42,7 +44,9 @@ def test_build_file_path_sanitizes_components(sample_recording):
     assert "?" not in path_str
 
 
-def test_download_creates_directories_and_writes_files(tmp_path, sample_recording):
+def test_download_creates_directories_and_writes_files(
+    tmp_path: Path, sample_recording: Recording
+) -> None:
     client = Mock()
     client.download_file.return_value = b"binary-data"
     downloader = RecordingDownloader(client, max_workers=1)
@@ -57,7 +61,9 @@ def test_download_creates_directories_and_writes_files(tmp_path, sample_recordin
     client.download_file.assert_called_once()
 
 
-def test_download_skips_existing_file_without_overwrite(tmp_path, sample_recording):
+def test_download_skips_existing_file_without_overwrite(
+    tmp_path: Path, sample_recording: Recording
+) -> None:
     client = Mock()
     downloader = RecordingDownloader(client, max_workers=1)
 
@@ -72,7 +78,9 @@ def test_download_skips_existing_file_without_overwrite(tmp_path, sample_recordi
     assert destination.read_bytes() == b"existing"
 
 
-def test_download_overwrites_when_requested(tmp_path, sample_recording):
+def test_download_overwrites_when_requested(
+    tmp_path: Path, sample_recording: Recording
+) -> None:
     client = Mock()
     client.download_file.return_value = b"new-data"
     downloader = RecordingDownloader(client, max_workers=1)
@@ -88,7 +96,7 @@ def test_download_overwrites_when_requested(tmp_path, sample_recording):
     assert destination.read_bytes() == b"new-data"
 
 
-def test_download_in_dry_run_mode(tmp_path, sample_recording):
+def test_download_in_dry_run_mode(tmp_path: Path, sample_recording: Recording) -> None:
     client = Mock()
     downloader = RecordingDownloader(client, max_workers=1)
 
@@ -100,7 +108,11 @@ def test_download_in_dry_run_mode(tmp_path, sample_recording):
     assert not destination.exists()
 
 
-def test_download_cleans_temp_on_failure(tmp_path, monkeypatch, sample_recording):
+def test_download_cleans_temp_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sample_recording: Recording,
+) -> None:
     client = Mock()
     client.download_file.return_value = b"binary-data"
     downloader = RecordingDownloader(client, max_workers=1)
@@ -109,10 +121,10 @@ def test_download_cleans_temp_on_failure(tmp_path, monkeypatch, sample_recording
     destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    def fail_replace(src, dst):
+    def fail_replace(_self: Path, _target: Path | str) -> None:
         raise OSError("boom")
 
-    monkeypatch.setattr("zoom_scribe.downloader.os.replace", fail_replace)
+    monkeypatch.setattr(Path, "replace", fail_replace)
 
     with pytest.raises(DownloadError):
         downloader.download([sample_recording], tmp_path, dry_run=False, overwrite=False)
@@ -122,11 +134,11 @@ def test_download_cleans_temp_on_failure(tmp_path, monkeypatch, sample_recording
 
 
 @pytest.mark.parametrize("value", [".", "..", "...", "...."])
-def test_sanitize_replaces_dot_only_values(value):
+def test_sanitize_replaces_dot_only_values(value: str) -> None:
     assert _sanitize(value) == "_"
 
 
-def test_concurrent_downloads_are_thread_safe(tmp_path):
+def test_concurrent_downloads_are_thread_safe(tmp_path: Path) -> None:
     """Ensure multiple files can be downloaded concurrently without race conditions."""
     call_count = 0
     call_lock = Lock()
@@ -134,7 +146,7 @@ def test_concurrent_downloads_are_thread_safe(tmp_path):
     # Create a mock client that simulates concurrent downloads with shared state
     client = Mock()
 
-    def download_with_delay(*args, **kwargs):
+    def download_with_delay(*_args: Any, **_kwargs: Any) -> bytes:
         nonlocal call_count
         with call_lock:
             call_count += 1
@@ -145,9 +157,9 @@ def test_concurrent_downloads_are_thread_safe(tmp_path):
     client.download_file.side_effect = download_with_delay
 
     # Create multiple recordings to download in parallel
-    recordings = []
+    recordings: list[Recording] = []
     for i in range(5):
-        payload = {
+        payload: dict[str, Any] = {
             "uuid": f"uuid-{i}",
             "topic": f"Meeting {i}",
             "host_email": "host@example.com",

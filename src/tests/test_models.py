@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -11,7 +12,7 @@ from zoom_scribe.models import (
 
 
 @pytest.fixture
-def recording_file_payload():
+def recording_file_payload() -> dict[str, Any]:
     return {
         "id": "file123",
         "file_type": "MP4",
@@ -21,7 +22,7 @@ def recording_file_payload():
     }
 
 
-def test_recording_file_from_api(recording_file_payload):
+def test_recording_file_from_api(recording_file_payload: dict[str, Any]) -> None:
     recording_file = RecordingFile.from_api(recording_file_payload)
 
     assert recording_file.id == "file123"
@@ -31,8 +32,10 @@ def test_recording_file_from_api(recording_file_payload):
     assert recording_file.download_access_token == "token-123"
 
 
-def test_recording_from_api_creates_recording_files(recording_file_payload):
-    payload = {
+def test_recording_from_api_creates_recording_files(
+    recording_file_payload: dict[str, Any]
+) -> None:
+    payload: dict[str, Any] = {
         "uuid": "meeting-uuid",
         "topic": "Team Sync",
         "host_email": "host@example.com",
@@ -50,8 +53,8 @@ def test_recording_from_api_creates_recording_files(recording_file_payload):
     assert recording.recording_files[0].id == "file123"
 
 
-def test_recording_from_api_requires_uuid(recording_file_payload):
-    payload = {
+def test_recording_from_api_requires_uuid(recording_file_payload: dict[str, Any]) -> None:
+    payload: dict[str, Any] = {
         "topic": "Team Sync",
         "host_email": "host@example.com",
         "start_time": "2025-09-28T10:00:00Z",
@@ -62,8 +65,10 @@ def test_recording_from_api_requires_uuid(recording_file_payload):
         Recording.from_api(payload)
 
 
-def test_recording_page_from_api_handles_pagination(recording_file_payload):
-    payload = {
+def test_recording_page_from_api_handles_pagination(
+    recording_file_payload: dict[str, Any]
+) -> None:
+    payload: dict[str, Any] = {
         "meetings": [
             {
                 "uuid": "meeting-uuid",
