@@ -39,6 +39,14 @@ RESERVED_LOG_RECORD_ATTRS: Final[set[str]] = {
     "process",
 }
 
+REDACTED_EXTRA_FIELDS: Final[set[str]] = {
+    "host_email",
+    "meeting_id",
+    "meeting_topic",
+    "recording_uuid",
+    "recording_file_id",
+}
+
 
 class JsonFormatter(logging.Formatter):
     """Serialize log records to JSON, preserving custom ``extra`` fields."""
@@ -54,7 +62,7 @@ class JsonFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in RESERVED_LOG_RECORD_ATTRS or key.startswith("_"):
                 continue
-            if key in {"host_email", "meeting_id", "meeting_topic", "recording_uuid", "recording_file_id"}:
+            if key in REDACTED_EXTRA_FIELDS:
                 payload[key] = redact_identifier(str(value))
             else:
                 payload[key] = value

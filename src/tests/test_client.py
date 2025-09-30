@@ -466,6 +466,4 @@ def test_download_file_with_access_token_validates_host():
 
     # Even with access_token in URL, non-Zoom hosts should be rejected
     with pytest.raises(ValueError, match="Refusing to download from non-Zoom host"):
-        client.download_file(
-            url="https://evil.com/file.mp4", access_token="secret-token"
-        )
+        client.download_file(url="https://evil.com/file.mp4", access_token="secret-token")
