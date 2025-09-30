@@ -1,0 +1,9 @@
+-r requirements.txt
+
+black
+isort
+mypy
+pytest
+pytest-cov
+ruff
+types-requests

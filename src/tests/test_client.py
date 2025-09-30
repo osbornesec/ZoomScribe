@@ -1,6 +1,8 @@
+import threading
 import time
+from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, NoReturn, Protocol, cast
 
 import pytest
 import requests
@@ -9,32 +11,42 @@ from zoom_scribe.client import ZoomAPIClient
 
 
 class StubResponse:
-    def __init__(self, payload, status_code=200, headers=None):
+    def __init__(
+        self,
+        payload: Any,
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         """Initialize the stub response with a payload, status, and headers."""
         self._payload = payload
         self.status_code = status_code
         self.headers = headers or {}
         self.text = str(payload)
+        self.reason = self.headers.get("reason", f"HTTP {status_code}")
+        self.request_args: tuple[str, str, dict[str, Any]] | None = None
 
-    def json(self):
+    def json(self) -> Any:
         """Return the stored payload."""
         return self._payload
 
-    def raise_for_status(self):
-        """Raise an HTTPError when the stubbed status code is an error."""
-        if self.status_code >= 400:
-            error = requests.HTTPError(f"HTTP {self.status_code}")
-            error.response = self
-            raise error
+    def iter_content(self, chunk_size: int = 8192) -> Iterator[bytes]:  # pragma: no cover
+        _ = chunk_size
+        if isinstance(self._payload, bytes):
+            yield self._payload
+        else:
+            yield b""
+
+    def close(self) -> None:  # pragma: no cover - needed for client cleanup
+        return None
 
 
 class DummySession:
-    def __init__(self, responses):
+    def __init__(self, responses: Sequence[StubResponse]) -> None:
         """Prepare the session with queued responses and reset the call log."""
         self._responses = list(responses)
-        self.calls = []
+        self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
-    def request(self, method, url, **kwargs):
+    def request(self, method: str, url: str, **kwargs: Any) -> StubResponse:
         """Record the request and return the next queued response."""
         self.calls.append((method, url, kwargs))
         response = self._responses.pop(0)
@@ -42,11 +54,25 @@ class DummySession:
         return response
 
 
+class ClientFactory(Protocol):
+    def __call__(
+        self,
+        responses: Sequence[StubResponse],
+        *,
+        sleeper: Callable[[float], None] | None = None,
+    ) -> tuple[ZoomAPIClient, DummySession]:
+        """Return a configured API client and dummy session."""
+
+
 @pytest.fixture
-def client_factory(monkeypatch):
+def client_factory() -> ClientFactory:
     """Return a factory that wires a ZoomAPIClient to a DummySession."""
 
-    def _factory(responses):
+    def _factory(
+        responses: Sequence[StubResponse],
+        *,
+        sleeper: Callable[[float], None] | None = None,
+    ) -> tuple[ZoomAPIClient, DummySession]:
         session = DummySession(responses)
         client = ZoomAPIClient(
             account_id="account",
@@ -56,13 +82,14 @@ def client_factory(monkeypatch):
             access_token="token-123",
             max_retries=3,
             backoff_factor=0.01,
+            sleeper=sleeper,
         )
         return client, session
 
     return _factory
 
 
-def make_meeting(uuid):
+def make_meeting(uuid: str) -> dict[str, Any]:
     """Create a deterministic meeting payload used by tests."""
     return {
         "uuid": uuid,
@@ -81,7 +108,7 @@ def make_meeting(uuid):
     }
 
 
-def test_list_recordings_returns_recording_models(client_factory):
+def test_list_recordings_returns_recording_models(client_factory: ClientFactory) -> None:
     responses = [
         StubResponse({"meetings": [make_meeting("uuid-1")], "next_page_token": ""}),
     ]
@@ -102,24 +129,22 @@ def test_list_recordings_returns_recording_models(client_factory):
     assert session.calls[0][2]["timeout"] == 10.0
 
 
-def test_list_recordings_normalizes_naive_datetimes(client_factory):
+def test_list_recordings_rejects_naive_datetimes(client_factory: ClientFactory) -> None:
     responses = [
         StubResponse({"meetings": [make_meeting("uuid-1")], "next_page_token": ""}),
     ]
-    client, session = client_factory(responses)
+    client, _ = client_factory(responses)
 
-    recordings = client.list_recordings(
-        start=datetime(2025, 9, 1),
-        end=datetime(2025, 9, 30),
-    )
-
-    assert len(recordings) == 1
-    params = session.calls[0][2]["params"]
-    assert params["from"] == "2025-09-01"
-    assert params["to"] == "2025-09-30"
+    with pytest.raises(ValueError):
+        client.list_recordings(
+            start=datetime(2025, 9, 1),  # noqa: DTZ001 - intentional naive datetime
+            end=datetime(2025, 9, 30),  # noqa: DTZ001 - intentional naive datetime
+        )
 
 
-def test_list_recordings_paginates_until_next_page_empty(client_factory):
+def test_list_recordings_paginates_until_next_page_empty(
+    client_factory: ClientFactory,
+) -> None:
     responses = [
         StubResponse({"meetings": [make_meeting("uuid-1")], "next_page_token": "abc"}),
         StubResponse({"meetings": [make_meeting("uuid-2")], "next_page_token": ""}),
@@ -135,20 +160,18 @@ def test_list_recordings_paginates_until_next_page_empty(client_factory):
     assert session.calls[1][2]["params"]["next_page_token"] == "abc"
 
 
-def test_list_recordings_retries_on_rate_limit(monkeypatch, client_factory):
+def test_list_recordings_retries_on_rate_limit(client_factory: ClientFactory) -> None:
     responses = [
         StubResponse({}, status_code=429, headers={"Retry-After": "1"}),
         StubResponse({"meetings": [make_meeting("uuid-3")], "next_page_token": ""}),
     ]
-    client, session = client_factory(responses)
+    sleep_calls: list[float] = []
 
-    sleep_calls = []
-
-    def fake_sleep(seconds):
+    def fake_sleep(seconds: float) -> None:
         """Record the requested sleep duration for assertions."""
         sleep_calls.append(seconds)
 
-    monkeypatch.setattr("zoom_scribe.client.time.sleep", fake_sleep)
+    client, session = client_factory(responses, sleeper=fake_sleep)
 
     recordings = client.list_recordings(
         start=datetime(2025, 9, 1, tzinfo=UTC),
@@ -161,7 +184,9 @@ def test_list_recordings_retries_on_rate_limit(monkeypatch, client_factory):
     assert session.calls[0][2]["timeout"] == 10.0
 
 
-def test_list_recordings_enumerates_meeting_instances(client_factory):
+def test_list_recordings_enumerates_meeting_instances(
+    client_factory: ClientFactory,
+) -> None:
     responses = [
         StubResponse(
             {
@@ -190,7 +215,9 @@ def test_list_recordings_enumerates_meeting_instances(client_factory):
     assert params["include_fields"] == "download_access_token"
 
 
-def test_list_recordings_meeting_id_fallback_to_direct_lookup(client_factory):
+def test_list_recordings_meeting_id_fallback_to_direct_lookup(
+    client_factory: ClientFactory,
+) -> None:
     responses = [
         StubResponse({"meetings": []}),
         StubResponse(make_meeting("123456")),
@@ -207,23 +234,26 @@ def test_list_recordings_meeting_id_fallback_to_direct_lookup(client_factory):
     assert session.calls[1][1].endswith("meetings/123456/recordings")
 
 
-def test_list_recordings_meeting_id_accepts_naive_datetimes(client_factory):
+def test_list_recordings_meeting_id_requires_aware_datetimes(
+    client_factory: ClientFactory,
+) -> None:
     responses = [
         StubResponse({"meetings": [{"uuid": "uuid-5"}]}),
         StubResponse(make_meeting("uuid-5")),
     ]
     client, _ = client_factory(responses)
 
-    recordings = client.list_recordings(
-        start=datetime(2025, 9, 1),
-        end=datetime(2025, 9, 30),
-        meeting_id="meeting-uuid",
-    )
+    with pytest.raises(ValueError):
+        client.list_recordings(
+            start=datetime(2025, 9, 1),  # noqa: DTZ001 - intentional naive datetime
+            end=datetime(2025, 9, 30),  # noqa: DTZ001 - intentional naive datetime
+            meeting_id="meeting-uuid",
+        )
 
-    assert [rec.uuid for rec in recordings] == ["uuid-5"]
 
-
-def test_list_recordings_meeting_id_honors_host_filter(client_factory):
+def test_list_recordings_meeting_id_honors_host_filter(
+    client_factory: ClientFactory,
+) -> None:
     responses = [
         StubResponse({"meetings": [{"uuid": "uuid-4"}]}),
         StubResponse(make_meeting("uuid-4")),
@@ -241,8 +271,8 @@ def test_list_recordings_meeting_id_honors_host_filter(client_factory):
 
 
 def test_list_recordings_meeting_id_with_single_slash_is_not_double_encoded(
-    client_factory,
-):
+    client_factory: ClientFactory,
+) -> None:
     """UUIDs with single slashes should be encoded only once."""
 
     uuid_with_slash = "a/b/c"
@@ -263,7 +293,7 @@ def test_list_recordings_meeting_id_with_single_slash_is_not_double_encoded(
     assert "meetings/a%2Fb%2Fc/recordings" in encoded_path
 
 
-def test_list_recordings_skips_missing_instance(client_factory):
+def test_list_recordings_skips_missing_instance(client_factory: ClientFactory) -> None:
     responses = [
         StubResponse({"meetings": [{"uuid": "missing"}, {"uuid": "present"}]}),
         StubResponse({}, status_code=404),
@@ -281,76 +311,38 @@ def test_list_recordings_skips_missing_instance(client_factory):
     assert session.calls[1][1].endswith("meetings/missing/recordings")
 
 
-def test_download_file_encodes_access_token():
-    class DownloadSession:
-        def __init__(self):
-            self.calls = []
+def test_download_file_encodes_access_token(client_factory: ClientFactory) -> None:
+    class StreamResponse(StubResponse):
+        def __init__(self) -> None:
+            super().__init__(b"ok")
 
-        def get(self, url, headers=None, stream=False, **kwargs):
-            self.calls.append((url, headers, stream, kwargs))
+        def json(self) -> Any:  # pragma: no cover - streaming payload
+            raise ValueError("no json")
 
-            class Response:
-                status_code = 200
-
-                def raise_for_status(self):
-                    return None
-
-                @property
-                def content(self):
-                    return b"ok"
-
-            return Response()
-
-        def request(self, *args, **kwargs):
-            raise AssertionError("request should not be called in this test")
-
-    session = DownloadSession()
-    client = ZoomAPIClient(
-        account_id="account",
-        client_id="id",
-        client_secret="secret",
-        session=cast(requests.Session, session),
-        access_token="token-123",
-    )
+    responses = [StreamResponse()]
+    client, session = client_factory(responses)
 
     client.download_file(url="https://zoom.us/download/file", access_token="abc+/=")
 
-    url, _, _, kwargs = session.calls[0]
+    method, url, kwargs = session.calls[0]
+    assert method == "GET"
     assert "access_token=abc%2B%2F%3D" in url
     assert kwargs["timeout"] == 10.0
+    headers = kwargs["headers"]
+    assert headers.get("Accept") == "*/*"
+    assert "Content-Type" not in headers
 
 
-def test_download_file_allows_timeout_override():
-    class DownloadSession:
-        def __init__(self):
-            self.calls = []
+def test_download_file_allows_timeout_override(client_factory: ClientFactory) -> None:
+    class StreamResponse(StubResponse):
+        def __init__(self) -> None:
+            super().__init__(b"ok")
 
-        def get(self, url, headers=None, stream=False, **kwargs):
-            self.calls.append((url, headers, stream, kwargs))
+        def json(self) -> Any:  # pragma: no cover - streaming payload
+            raise ValueError("no json")
 
-            class Response:
-                status_code = 200
-
-                def raise_for_status(self):
-                    return None
-
-                @property
-                def content(self):
-                    return b"ok"
-
-            return Response()
-
-        def request(self, *args, **kwargs):
-            raise AssertionError("request should not be called in this test")
-
-    session = DownloadSession()
-    client = ZoomAPIClient(
-        account_id="account",
-        client_id="id",
-        client_secret="secret",
-        session=cast(requests.Session, session),
-        access_token="token-123",
-    )
+    responses = [StreamResponse()]
+    client, session = client_factory(responses)
 
     client.download_file(
         url="https://zoom.us/download/file",
@@ -358,11 +350,12 @@ def test_download_file_allows_timeout_override():
         timeout=5.0,
     )
 
-    _, _, _, kwargs = session.calls[0]
+    method, _url, kwargs = session.calls[0]
+    assert method == "GET"
     assert kwargs["timeout"] == 5.0
 
 
-def test_ensure_access_token_raises_when_expired_without_credentials():
+def test_ensure_access_token_raises_when_expired_without_credentials() -> None:
     session = DummySession([])
     client = ZoomAPIClient(
         session=cast(requests.Session, session),
@@ -374,14 +367,54 @@ def test_ensure_access_token_raises_when_expired_without_credentials():
         client._ensure_access_token()
 
 
-def test_download_file_rejects_non_zoom_host():
+def test_concurrent_client_access_is_thread_safe() -> None:
+    """Ensure the client can be safely used from multiple threads."""
+    # Create a client with a token that doesn't expire
+    session = DummySession([])
+    client = ZoomAPIClient(
+        session=cast(requests.Session, session),
+        access_token="shared-token",
+    )
+
+    errors: list[Exception] = []
+    results: list[str] = []
+
+    def access_token_concurrently() -> None:
+        try:
+            # Call _ensure_access_token from multiple threads
+            client._ensure_access_token()
+            # Access the token (simulating what _headers does)
+            token = client._access_token
+            if token is None:  # pragma: no cover - defensive for mypy
+                raise AssertionError("Expected access token to be populated")
+            results.append(token)
+        except Exception as exc:
+            errors.append(exc)
+
+    # Start multiple threads that access the client simultaneously
+    threads: list[threading.Thread] = [
+        threading.Thread(target=access_token_concurrently)
+        for _ in range(10)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    # Verify no errors occurred and all threads saw the same token
+    assert len(errors) == 0, f"Errors occurred: {errors}"
+    assert len(results) == 10
+    assert all(token == "shared-token" for token in results)
+
+
+def test_download_file_rejects_non_zoom_host() -> None:
     """Ensure download_file refuses non-Zoom domains (SSRF protection)."""
 
     class DownloadSession:
-        def get(self, *args, **kwargs):
+        def get(self, *_args: Any, **_kwargs: Any) -> NoReturn:
             raise AssertionError("get should not be called for non-Zoom host")
 
-        def request(self, *args, **kwargs):
+        def request(self, *_args: Any, **_kwargs: Any) -> NoReturn:
             raise AssertionError("request should not be called for non-Zoom")
 
     session = DownloadSession()
@@ -394,7 +427,7 @@ def test_download_file_rejects_non_zoom_host():
     )
 
     # Test various non-Zoom hosts
-    bad_hosts = [
+    bad_hosts: list[str] = [
         "https://evil.com/file.mp4",
         "https://zoom.us.attacker.com/file.mp4",
         "https://notzoom.us/file.mp4",
@@ -407,36 +440,16 @@ def test_download_file_rejects_non_zoom_host():
             client.download_file(url=url)
 
 
-def test_download_file_allows_zoom_hosts():
+def test_download_file_allows_zoom_hosts() -> None:
     """Ensure download_file accepts valid Zoom domains."""
 
     class DownloadSession:
-        def __init__(self):
-            self.calls = []
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
-        def get(self, url, headers=None, stream=False, **kwargs):
-            self.calls.append((url, headers, stream, kwargs))
-
-            class Response:
-                status_code = 200
-
-                def raise_for_status(self):
-                    return None
-
-                @property
-                def content(self):
-                    return b"test-content"
-
-                def close(self):
-                    pass
-
-                def iter_content(self, chunk_size=None):
-                    yield b"test-content"
-
-            return Response()
-
-        def request(self, *args, **kwargs):
-            raise AssertionError("request should not be called in this test")
+        def request(self, method: str, url: str, **kwargs: Any) -> StubResponse:
+            self.calls.append((method, url, kwargs))
+            return StubResponse(b"test-content")
 
     session = DownloadSession()
     client = ZoomAPIClient(
@@ -448,7 +461,7 @@ def test_download_file_allows_zoom_hosts():
     )
 
     # Test various valid Zoom hosts
-    valid_hosts = [
+    valid_hosts: list[str] = [
         "https://zoom.us/rec/download/file.mp4",
         "https://api.zoom.us/v2/recordings/download",
         "https://us01web.zoom.us/rec/download/file.mp4",
@@ -459,16 +472,24 @@ def test_download_file_allows_zoom_hosts():
         content = client.download_file(url=url)
         assert content == b"test-content"
         assert len(session.calls) > 0
+        method, recorded_url, recorded_kwargs = session.calls[-1]
+        assert method == "GET"
+        assert recorded_url == url
+        headers = recorded_kwargs["headers"]
+        assert headers["Accept"] == "*/*"
+        assert "Content-Type" not in headers
+        assert recorded_kwargs["stream"] is True
+        assert recorded_kwargs["allow_redirects"] is False
 
 
-def test_download_file_with_access_token_validates_host():
+def test_download_file_with_access_token_validates_host() -> None:
     """Ensure host validation happens even when access_token is provided."""
 
     class DownloadSession:
-        def get(self, *args, **kwargs):
+        def get(self, *_args: Any, **_kwargs: Any) -> NoReturn:
             raise AssertionError("Session.get should not be called")
 
-        def request(self, *args, **kwargs):
+        def request(self, *_args: Any, **_kwargs: Any) -> NoReturn:
             raise AssertionError("Session.request should not be called")
 
     session = DownloadSession()
@@ -482,6 +503,4 @@ def test_download_file_with_access_token_validates_host():
 
     # Even with access_token in URL, non-Zoom hosts should be rejected
     with pytest.raises(ValueError, match="Refusing to download from non-Zoom host"):
-        client.download_file(
-            url="https://evil.com/file.mp4", access_token="secret-token"
-        )
+        client.download_file(url="https://evil.com/file.mp4", access_token="secret-token")
