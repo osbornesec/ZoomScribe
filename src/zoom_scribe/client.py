@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime
@@ -152,6 +153,7 @@ class ZoomAPIClient:
         self._token_expiry: float | None = None
         self._clock = clock or time.time
         self._sleep = sleeper or time.sleep
+        self._lock = threading.RLock()
 
     @classmethod
     def from_env(
@@ -376,7 +378,7 @@ class ZoomAPIClient:
         try:
             for chunk in response.iter_content(chunk_size=64 * 1024):
                 if chunk:
-                    content.append(chunk)
+                    content.append(chunk)  # noqa: PERF401
         finally:
             response.close()
 
@@ -432,16 +434,17 @@ class ZoomAPIClient:
                     "timeout": effective_timeout,
                 },
             )
-            response = self.session.request(
-                method,
-                url,
-                params=params,
-                json=json,
-                headers=headers,
-                timeout=effective_timeout,
-                stream=stream,
-                allow_redirects=allow_redirects,
-            )
+            with self._lock:
+                response = self.session.request(
+                    method,
+                    url,
+                    params=params,
+                    json=json,
+                    headers=headers,
+                    timeout=effective_timeout,
+                    stream=stream,
+                    allow_redirects=allow_redirects,
+                )
             status_code = response.status_code
             request_id = response.headers.get(REQUEST_ID_HEADER)
 
@@ -455,8 +458,9 @@ class ZoomAPIClient:
                     "zoom.request.unauthorized_retry",
                     extra={"path": safe_path, "request_id": request_id},
                 )
-                self._access_token = None
-                self._token_expiry = 0.0
+                with self._lock:
+                    self._access_token = None
+                    self._token_expiry = 0.0
                 self._ensure_access_token()
                 auth_refreshed = True
                 continue
@@ -621,45 +625,46 @@ class ZoomAPIClient:
 
     def _ensure_access_token(self) -> None:
         """Ensure a valid OAuth access token is cached or fetch a new one."""
-        if self._access_token and self._token_expiry is None:
-            return
-        skew = 60.0  # seconds
-        token_expired = bool(
-            self._token_expiry is not None and (self._token_expiry - skew) <= self._clock()
-        )
-        if self._access_token and not token_expired:
-            return
-        if not all([self.account_id, self.client_id, self.client_secret]):
-            if self._access_token and token_expired:
-                raise TokenRefreshError("Cannot refresh access token without OAuth credentials")
-            raise MissingCredentialsError("OAuth credentials are required")
-
-        assert self.client_id is not None
-        assert self.client_secret is not None
-        assert self.account_id is not None
-        self.logger.debug("zoom.auth.request_token", extra={"token_url": self.token_url})
-        response = self.session.post(
-            self.token_url,
-            data={"grant_type": "account_credentials", "account_id": self.account_id},
-            auth=(self.client_id, self.client_secret),
-            timeout=self.timeout,
-        )
-        if response.status_code >= HTTP_STATUS_BAD_REQUEST:
-            response.close()
-            raise ZoomAuthError(
-                "Failed to obtain Zoom access token",
-                status_code=response.status_code,
-                request_id=response.headers.get(REQUEST_ID_HEADER),
+        with self._lock:
+            if self._access_token and self._token_expiry is None:
+                return
+            skew = 60.0  # seconds
+            token_expired = bool(
+                self._token_expiry is not None and (self._token_expiry - skew) <= self._clock()
             )
-        payload = response.json()
-        response.close()
-        self._access_token = payload["access_token"]
-        expires_in = payload.get("expires_in")
-        self._token_expiry = self._clock() + float(expires_in) if expires_in else None
-        self.logger.info(
-            "zoom.auth.token_acquired",
-            extra={"expires_in": expires_in, "has_expiry": bool(expires_in)},
-        )
+            if self._access_token and not token_expired:
+                return
+            if not all([self.account_id, self.client_id, self.client_secret]):
+                if self._access_token and token_expired:
+                    raise TokenRefreshError("Cannot refresh access token without OAuth credentials")
+                raise MissingCredentialsError("OAuth credentials are required")
+
+            assert self.client_id is not None
+            assert self.client_secret is not None
+            assert self.account_id is not None
+            self.logger.debug("zoom.auth.request_token", extra={"token_url": self.token_url})
+            response = self.session.post(
+                self.token_url,
+                data={"grant_type": "account_credentials", "account_id": self.account_id},
+                auth=(self.client_id, self.client_secret),
+                timeout=self.timeout,
+            )
+            if response.status_code >= HTTP_STATUS_BAD_REQUEST:
+                response.close()
+                raise ZoomAuthError(
+                    "Failed to obtain Zoom access token",
+                    status_code=response.status_code,
+                    request_id=response.headers.get(REQUEST_ID_HEADER),
+                )
+            payload = response.json()
+            response.close()
+            self._access_token = payload["access_token"]
+            expires_in = payload.get("expires_in")
+            self._token_expiry = self._clock() + float(expires_in) if expires_in else None
+            self.logger.info(
+                "zoom.auth.token_acquired",
+                extra={"expires_in": expires_in, "has_expiry": bool(expires_in)},
+            )
 
     @staticmethod
     def _path_template_for_log(path: str) -> str:

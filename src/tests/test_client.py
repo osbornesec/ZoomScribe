@@ -1,3 +1,4 @@
+import threading
 import time
 from datetime import UTC, datetime
 from typing import cast
@@ -332,3 +333,38 @@ def test_ensure_access_token_raises_when_expired_without_credentials():
 
     with pytest.raises(RuntimeError):
         client._ensure_access_token()
+
+
+def test_concurrent_client_access_is_thread_safe():
+    """Ensure the client can be safely used from multiple threads."""
+    # Create a client with a token that doesn't expire
+    session = DummySession([])
+    client = ZoomAPIClient(
+        session=cast(requests.Session, session),
+        access_token="shared-token",
+    )
+
+    errors = []
+    results = []
+
+    def access_token_concurrently():
+        try:
+            # Call _ensure_access_token from multiple threads
+            client._ensure_access_token()
+            # Access the token (simulating what _headers does)
+            token = client._access_token
+            results.append(token)
+        except Exception as e:
+            errors.append(e)
+
+    # Start multiple threads that access the client simultaneously
+    threads = [threading.Thread(target=access_token_concurrently) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Verify no errors occurred and all threads saw the same token
+    assert len(errors) == 0, f"Errors occurred: {errors}"
+    assert len(results) == 10
+    assert all(token == "shared-token" for token in results)
