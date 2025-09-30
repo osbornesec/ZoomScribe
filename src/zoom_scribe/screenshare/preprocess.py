@@ -363,7 +363,7 @@ def build_frame_time_mapping(bundles: list[FrameBundle]) -> str:
     """
     mapping: list[tuple[int, float]] = []
     for bundle in bundles:
-        mapping.extend(zip(bundle.frame_indices, bundle.timestamps_sec, strict=False))
+        mapping.extend(zip(bundle.frame_indices, bundle.timestamps_sec, strict=True))
 
     mapping.sort(key=lambda item: item[0])
 

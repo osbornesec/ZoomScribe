@@ -1,6 +1,6 @@
 requests
 click
 python-dotenv
-opencv-python-headless==4.12.0.88
-numpy==2.2.6
-scikit-image==0.25.2
+opencv-python-headless==4.9.0.80
+numpy==1.26.4
+scikit-image==0.22.0

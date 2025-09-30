@@ -139,9 +139,12 @@ def create_downloader(
     return RecordingDownloader(client, logger=logger)
 
 
-@click.group()
-def cli() -> None:
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx: click.Context) -> None:
     """Root entry point for ZoomScribe commands."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(download)
 
 
 @cli.command()

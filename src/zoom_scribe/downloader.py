@@ -193,7 +193,7 @@ class RecordingDownloader:
             self.logger.exception(
                 "screenshare.post_download_failed",
                 extra={
-                    "destination": str(destination),
+                    "destination": redact_identifier(str(destination)),
                     "recording_id": redact_identifier(recording.uuid),
                     "recording_file_id": redact_identifier(recording_file.id),
                 },

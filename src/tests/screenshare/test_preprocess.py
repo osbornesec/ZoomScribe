@@ -36,14 +36,15 @@ def synthetic_video(tmp_path: Path) -> Path:
     if not writer.isOpened():
         pytest.skip("Video writer could not be initialized")
 
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    for frame_idx in range(int(fps * 3)):
-        frame = np.full((frame_size[1], frame_size[0], 3), 255, dtype=np.uint8)
-        text = "Frame 1-10" if frame_idx < fps else "Frame 11-20"
-        cv2.putText(frame, text, (50, 240), font, 1.0, (0, 0, 0), 2, cv2.LINE_AA)
-        writer.write(frame)
-
-    writer.release()
+    try:
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        for frame_idx in range(int(fps * 3)):
+            frame = np.full((frame_size[1], frame_size[0], 3), 255, dtype=np.uint8)
+            text = "Frame 1-10" if frame_idx < fps else "Frame 11-20"
+            cv2.putText(frame, text, (50, 240), font, 1.0, (0, 0, 0), 2, cv2.LINE_AA)
+            writer.write(frame)
+    finally:
+        writer.release()
     return video_path
 
 
@@ -128,8 +129,10 @@ def test_detect_roi_success(synthetic_video: Path, default_config: PreprocessCon
     assert 0.0 <= roi.confidence <= 1.0
 
 
-def test_detect_roi_missing_file(default_config: PreprocessConfig) -> None:
-    missing_path = Path("/tmp/nonexistent.mp4")
+def test_detect_roi_missing_file(
+    tmp_path: Path, default_config: PreprocessConfig
+) -> None:
+    missing_path = tmp_path / "nonexistent.mp4"
     with pytest.raises(PreprocessingError):
         detect_roi(missing_path, default_config)
 
@@ -240,8 +243,10 @@ def test_preprocess_video_with_custom_config(synthetic_video: Path) -> None:
     assert all(len(bundle.frame_indices) <= 3 for bundle in bundles)
 
 
-def test_preprocess_video_missing_file(default_config: PreprocessConfig) -> None:
-    missing_path = Path("/tmp/nonexistent.mp4")
+def test_preprocess_video_missing_file(
+    tmp_path: Path, default_config: PreprocessConfig
+) -> None:
+    missing_path = tmp_path / "nonexistent.mp4"
     with pytest.raises(PreprocessingError):
         preprocess_video(missing_path, default_config)
 
