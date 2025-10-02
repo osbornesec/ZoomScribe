@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from zoom_scribe.config import DownloaderConfig
 from zoom_scribe.downloader import DownloadError, RecordingDownloader, _sanitize
 from zoom_scribe.models import Recording
 
@@ -31,10 +32,13 @@ def sample_recording() -> Recording:
 
 
 def test_build_file_path_sanitizes_components(sample_recording: Recording) -> None:
-    downloader = RecordingDownloader(Mock())
-    recording_file = sample_recording.recording_files[0]
+    config = DownloaderConfig()
+    downloader = RecordingDownloader(Mock(), config=config)
+    recording_file = sample_recording.files[0]
 
-    destination = downloader.build_file_path(sample_recording, recording_file, "/downloads")
+    destination = downloader.build_file_path(
+        sample_recording, recording_file, Path("/downloads")
+    )
 
     path_str = destination.as_posix()
     assert "/downloads" in path_str
@@ -48,33 +52,35 @@ def test_download_creates_directories_and_writes_files(
     tmp_path: Path, sample_recording: Recording
 ) -> None:
     client = Mock()
-    client.download_file.return_value = b"binary-data"
-    downloader = RecordingDownloader(client, max_workers=1)
+    client.download_recording_file.return_value = b"binary-data"
+    config = DownloaderConfig(target_dir=tmp_path)
+    downloader = RecordingDownloader(client, config=config, max_workers=1)
 
-    downloader.download([sample_recording], tmp_path, dry_run=False, overwrite=False)
+    downloader.download([sample_recording])
 
-    recording_file = sample_recording.recording_files[0]
+    recording_file = sample_recording.files[0]
     destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
     assert destination.exists()
     assert destination.read_bytes() == b"binary-data"
     assert not destination.with_suffix(destination.suffix + ".part").exists()
-    client.download_file.assert_called_once()
+    client.download_recording_file.assert_called_once()
 
 
 def test_download_skips_existing_file_without_overwrite(
     tmp_path: Path, sample_recording: Recording
 ) -> None:
     client = Mock()
-    downloader = RecordingDownloader(client, max_workers=1)
+    config = DownloaderConfig(target_dir=tmp_path, overwrite=False)
+    downloader = RecordingDownloader(client, config=config, max_workers=1)
 
-    recording_file = sample_recording.recording_files[0]
+    recording_file = sample_recording.files[0]
     destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(b"existing")
 
-    downloader.download([sample_recording], tmp_path, dry_run=False, overwrite=False)
+    downloader.download([sample_recording])
 
-    client.download_file.assert_not_called()
+    client.download_recording_file.assert_not_called()
     assert destination.read_bytes() == b"existing"
 
 
@@ -82,30 +88,42 @@ def test_download_overwrites_when_requested(
     tmp_path: Path, sample_recording: Recording
 ) -> None:
     client = Mock()
-    client.download_file.return_value = b"new-data"
-    downloader = RecordingDownloader(client, max_workers=1)
+    client.download_recording_file.return_value = b"new-data"
+    config = DownloaderConfig(target_dir=tmp_path, overwrite=True)
+    downloader = RecordingDownloader(client, config=config, max_workers=1)
 
-    recording_file = sample_recording.recording_files[0]
+    recording_file = sample_recording.files[0]
     destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(b"old-data")
 
-    downloader.download([sample_recording], tmp_path, dry_run=False, overwrite=True)
+    downloader.download([sample_recording])
 
-    client.download_file.assert_called_once()
+    client.download_recording_file.assert_called_once()
     assert destination.read_bytes() == b"new-data"
 
 
 def test_download_in_dry_run_mode(tmp_path: Path, sample_recording: Recording) -> None:
     client = Mock()
-    downloader = RecordingDownloader(client, max_workers=1)
+    config = DownloaderConfig(target_dir=tmp_path, dry_run=True)
+    downloader = RecordingDownloader(client, config=config, max_workers=1)
 
-    downloader.download([sample_recording], tmp_path, dry_run=True, overwrite=False)
+    hook_called = False
 
-    client.download_file.assert_not_called()
-    recording_file = sample_recording.recording_files[0]
+    def hook(*_args: Any) -> None:
+        nonlocal hook_called
+        hook_called = True
+
+    downloader.download(
+        [sample_recording],
+        post_download=hook,
+    )
+
+    client.download_recording_file.assert_not_called()
+    recording_file = sample_recording.files[0]
     destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
     assert not destination.exists()
+    assert hook_called is False
 
 
 def test_download_cleans_temp_on_failure(
@@ -114,10 +132,11 @@ def test_download_cleans_temp_on_failure(
     sample_recording: Recording,
 ) -> None:
     client = Mock()
-    client.download_file.return_value = b"binary-data"
-    downloader = RecordingDownloader(client, max_workers=1)
+    client.download_recording_file.return_value = b"binary-data"
+    config = DownloaderConfig(target_dir=tmp_path)
+    downloader = RecordingDownloader(client, config=config, max_workers=1)
 
-    recording_file = sample_recording.recording_files[0]
+    recording_file = sample_recording.files[0]
     destination = downloader.build_file_path(sample_recording, recording_file, tmp_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -127,7 +146,7 @@ def test_download_cleans_temp_on_failure(
     monkeypatch.setattr(Path, "replace", fail_replace)
 
     with pytest.raises(DownloadError):
-        downloader.download([sample_recording], tmp_path, dry_run=False, overwrite=False)
+        downloader.download([sample_recording])
 
     temp_path = destination.with_suffix(destination.suffix + ".part")
     assert not temp_path.exists()
@@ -154,7 +173,7 @@ def test_concurrent_downloads_are_thread_safe(tmp_path: Path) -> None:
         time.sleep(0.01)
         return b"data"
 
-    client.download_file.side_effect = download_with_delay
+    client.download_recording_file.side_effect = download_with_delay
 
     # Create multiple recordings to download in parallel
     recordings: list[Recording] = []
@@ -176,16 +195,42 @@ def test_concurrent_downloads_are_thread_safe(tmp_path: Path) -> None:
         }
         recordings.append(Recording.from_api(payload))
 
-    downloader = RecordingDownloader(client, max_workers=3)
-    downloader.download(recordings, tmp_path, dry_run=False, overwrite=False)
+    config = DownloaderConfig(target_dir=tmp_path)
+    downloader = RecordingDownloader(client, config=config, max_workers=3)
+    downloader.download(recordings)
 
     # Verify all files were downloaded
     assert call_count == 5
-    assert client.download_file.call_count == 5
+    assert client.download_recording_file.call_count == 5
 
     # Verify all files exist on disk
     for recording in recordings:
-        recording_file = recording.recording_files[0]
+        recording_file = recording.files[0]
         destination = downloader.build_file_path(recording, recording_file, tmp_path)
         assert destination.exists()
         assert destination.read_bytes() == b"data"
+
+
+def test_download_invokes_post_download_hook(
+    tmp_path: Path, sample_recording: Recording
+) -> None:
+    client = Mock()
+    client.download_recording_file.return_value = b"binary-data"
+    config = DownloaderConfig(target_dir=tmp_path)
+    downloader = RecordingDownloader(client, config=config, max_workers=1)
+    calls: list[Path] = []
+
+    def hook(path: Path, *_args: Any) -> None:
+        calls.append(path)
+
+    downloader.download(
+        [sample_recording],
+        post_download=hook,
+    )
+
+    assert calls
+    recording_file = sample_recording.files[0]
+    expected_path = downloader.build_file_path(
+        sample_recording, recording_file, tmp_path
+    )
+    assert calls[0] == expected_path

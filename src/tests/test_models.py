@@ -32,9 +32,7 @@ def test_recording_file_from_api(recording_file_payload: dict[str, Any]) -> None
     assert recording_file.download_access_token == "token-123"
 
 
-def test_recording_from_api_creates_recording_files(
-    recording_file_payload: dict[str, Any]
-) -> None:
+def test_recording_from_api_creates_recording_files(recording_file_payload: dict[str, Any]) -> None:
     payload: dict[str, Any] = {
         "uuid": "meeting-uuid",
         "topic": "Team Sync",
@@ -65,9 +63,7 @@ def test_recording_from_api_requires_uuid(recording_file_payload: dict[str, Any]
         Recording.from_api(payload)
 
 
-def test_recording_page_from_api_handles_pagination(
-    recording_file_payload: dict[str, Any]
-) -> None:
+def test_recording_page_from_api_handles_pagination(recording_file_payload: dict[str, Any]) -> None:
     payload: dict[str, Any] = {
         "meetings": [
             {
