@@ -16,9 +16,39 @@ RecordingFactory = Callable[[str], Recording]
 
 @pytest.fixture
 def recording_factory() -> RecordingFactory:
-    """Return a factory for creating sample ``Recording`` instances."""
+    """
+    Create a factory that builds sample Recording objects for tests.
+    
+    The returned callable accepts a recording UUID and returns a Recording populated with deterministic test data:
+    - topic: "Project / Kickoff?"
+    - host_email: "host@example.com"
+    - start_time: "2025-09-28T10:00:00Z"
+    - one recording_file whose `id`, `download_url`, and other file fields incorporate the given UUID
+    
+    Returns:
+        RecordingFactory: A callable that takes a `uuid` (str) and returns a populated `Recording` suitable for use in unit tests.
+    """
 
     def _factory(uuid: str) -> Recording:
+        """
+        Create a Recording instance populated with deterministic test data for the given UUID.
+        
+        Constructs a payload that mimics the API representation of a recording with a single MP4 file,
+        then returns a Recording parsed from that payload. Intended for use in tests; the returned
+        Recording contains predictable fields (topic, host_email, start_time, and one recording file)
+        that are safe to inspect or write to disk.
+        
+        Parameters:
+            uuid (str): Identifier to embed into the recording and file IDs/URLs.
+        
+        Returns:
+            Recording: A Recording object created from the synthetic API payload.
+        
+        Notes:
+            - The function produces test-only data and does not perform network I/O.
+            - The generated recording file uses a constant access token and deterministic download_url
+              based on the provided UUID.
+        """
         payload: dict[str, Any] = {
             "uuid": uuid,
             "topic": "Project / Kickoff?",

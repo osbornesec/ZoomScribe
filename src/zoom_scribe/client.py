@@ -674,7 +674,30 @@ class ZoomAPIClient:
 
     @staticmethod
     def _validate_timeout(timeout: Timeout) -> Timeout:
-        """Ensure a timeout is either ``None``, a non-negative float, or tuple."""
+        """
+        Validate and normalize a timeout value for HTTP requests.
+        
+        Parameters:
+            timeout (float | tuple[float, float] | None): A timeout value which may be:
+                - None to disable timeout handling,
+                - A non-negative numeric value (connect+read combined),
+                - A two-element tuple (connect_timeout, read_timeout) with non-negative numerics.
+        
+        Returns:
+            float | tuple[float, float] | None: Normalized timeout where numeric inputs are converted to
+            float and tuple components are returned as a two-tuple of floats, or None if passed through.
+        
+        Raises:
+            TypeError: If the value or tuple components are not numeric (booleans are rejected),
+                or if the top-level type is unsupported.
+            ValueError: If a numeric value or any tuple component is negative, or if a timeout tuple
+                does not contain exactly two elements.
+        
+        Notes:
+            - Tuple inputs must contain exactly two components.
+            - All returned numeric values are guaranteed to be >= 0.
+            - This function has no side effects and is safe to call from multiple threads.
+        """
         if timeout is None:
             return None
         if isinstance(timeout, bool):
