@@ -136,9 +136,7 @@ def test_cli_configures_logging(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["config"].format.lower() == "json"
 
 
-def test_cli_rejects_file_target_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_rejects_file_target_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CLI exits with an error when `--target-dir` points to an existing file."""
     file_path = tmp_path / "existing.txt"
     file_path.write_text("content", encoding="utf-8")
