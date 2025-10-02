@@ -135,20 +135,21 @@ def load_oauth_credentials(
     dotenv_path: str | os.PathLike[str] | None = None,
     environ: Mapping[str, str | None] | None = None,
 ) -> OAuthCredentials:
-    """Load Zoom OAuth credentials from the environment and optional ``.env`` file.
-
-    Args:
-        dotenv_path: Optional path to a dotenv file. When supplied, the file is
-            loaded before reading environment variables. The default behaviour
-            mirrors :func:`python_dotenv.find_dotenv`.
-        environ: Optional mapping used instead of :data:`os.environ`. Primarily
-            intended for testing.
-
+    """
+    Load Zoom OAuth credentials from environment variables and an optional dotenv file.
+    
+    Parameters:
+        dotenv_path (str | os.PathLike | None): Optional path to a dotenv file. When provided, the file is searched for and loaded before reading environment variables.
+        environ (Mapping[str, str | None] | None): Optional mapping to use instead of os.environ; primarily intended for testing and overrides environment lookup when provided.
+    
     Returns:
-        Loaded :class:`OAuthCredentials` instance with validated values.
-
+        OAuthCredentials: Validated credentials containing `account_id`, `client_id`, and `client_secret` as strings.
+    
     Raises:
-        ConfigurationError: When any credential is missing.
+        ConfigurationError: If any of the required credentials are missing; the error message lists the missing environment variable names.
+    
+    Side effects:
+        If a dotenv file is resolved, it is loaded (without overriding existing environment values) and a debug-level log entry is emitted indicating the path used.
     """
     env: MutableMapping[str, str | None]
     if environ is not None:
