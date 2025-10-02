@@ -15,6 +15,13 @@ import click
 from ._datetime import ensure_utc
 from ._redact import redact_identifier
 from .client import ZoomAPIClient
+from .config import (
+    Config,
+    DownloaderConfig,
+    LoggingConfig,
+    ScreenshareConfig,
+    load_oauth_credentials,
+)
 from .downloader import RecordingDownloader
 from .models import Recording, RecordingFile
 from .screenshare.preprocess import (
@@ -79,19 +86,18 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str, ensure_ascii=False)
 
 
-def configure_logging(level: str, fmt: str) -> logging.Logger:
+def configure_logging(config: LoggingConfig) -> logging.Logger:
     """Configure the ``zoom_scribe`` logger hierarchy.
 
     Args:
-        level: Logging level name (e.g., ``"info"``).
-        fmt: Requested format (``"auto"``, ``"json"``, or ``"text"``).
+        config: Logging configuration settings.
 
     Returns:
         logging.Logger: Root logger for the Zoom Scribe namespace.
     """
-    resolved_level = getattr(logging, level.upper(), logging.INFO)
+    resolved_level = getattr(logging, config.level.upper(), logging.INFO)
     handler = logging.StreamHandler()
-    resolved_format = fmt.lower()
+    resolved_format = config.format.lower()
     if resolved_format == "auto":
         stream = getattr(handler, "stream", sys.stderr)
         is_tty = bool(getattr(stream, "isatty", lambda: False)())
@@ -115,28 +121,30 @@ def configure_logging(level: str, fmt: str) -> logging.Logger:
     return logger
 
 
-def create_client() -> ZoomAPIClient:
-    """Instantiate a ZoomAPIClient configured from the environment.
+def create_client(config: Config) -> ZoomAPIClient:
+    """Instantiate a ZoomAPIClient from the application configuration.
+
+    Args:
+        config: Unified application configuration.
 
     Returns:
         ZoomAPIClient: Client ready to communicate with the Zoom API.
     """
-    return ZoomAPIClient.from_env()
+    return ZoomAPIClient.from_config(config)
 
 
-def create_downloader(
-    client: ZoomAPIClient, logger: logging.Logger | None = None
-) -> RecordingDownloader:
+def create_downloader(config: Config, client: ZoomAPIClient) -> RecordingDownloader:
     """Build a RecordingDownloader bound to the provided client and logger.
 
     Args:
+        config: Unified application configuration.
         client: Configured Zoom API client used to fetch recording bytes.
-        logger: Optional logger for progress reporting.
 
     Returns:
         RecordingDownloader: Downloader instance tied to ``client``.
     """
-    return RecordingDownloader(client, logger=logger)
+    logger = logging.getLogger("zoom_scribe.downloader")
+    return RecordingDownloader(client, config=config.downloader, logger=logger)
 
 
 @click.group(invoke_without_command=True)
@@ -145,6 +153,34 @@ def cli(ctx: click.Context) -> None:
     """Root entry point for ZoomScribe commands."""
     if ctx.invoked_subcommand is None:
         ctx.invoke(download)
+
+
+def build_config(**options: Any) -> Config:
+    """Construct a unified ``Config`` from raw CLI ``options``."""
+    preprocess_config = PreprocessConfig(
+        target_fps=cast(float, options["screenshare_target_fps"]),
+        roi_detection_duration_sec=cast(float, options["screenshare_roi_seconds"]),
+        ssim_threshold=cast(float, options["screenshare_ssim_threshold"]),
+        bundle_max_frames=cast(int, options["screenshare_bundle_max_frames"]),
+        bundle_max_time_gap_sec=cast(float, options["screenshare_bundle_gap"]),
+    )
+    return Config(
+        credentials=load_oauth_credentials(),
+        logging=LoggingConfig(
+            level=cast(str, options["log_level"]),
+            format=cast(str, options["log_format"]),
+        ),
+        downloader=DownloaderConfig(
+            target_dir=Path(cast(str, options["target_dir"])),
+            overwrite=cast(bool, options["overwrite"]),
+            dry_run=cast(bool, options["dry_run"]),
+        ),
+        screenshare=ScreenshareConfig(
+            enabled=cast(bool, options["screenshare_preprocess"]),
+            output_dir=cast(Path | None, options["screenshare_output_dir"]),
+            preprocess_config=preprocess_config,
+        ),
+    )
 
 
 @cli.command()
@@ -235,26 +271,13 @@ def cli(ctx: click.Context) -> None:
 )
 def download(**options: Any) -> None:
     """Run the CLI workflow to fetch and optionally download Zoom recordings."""
-    configure_logging(
-        cast(str, options["log_level"]),
-        cast(str, options["log_format"]),
-    )
-    logger = logging.getLogger("zoom_scribe.cli")
+    config = build_config(**options)
+    logger = configure_logging(config.logging)
 
     from_date = cast(datetime | None, options["from_date"])
     to_date = cast(datetime | None, options["to_date"])
-    target_dir = cast(str, options["target_dir"])
     host_email = cast(str | None, options["host_email"])
     meeting_id = cast(str | None, options["meeting_id"])
-    dry_run = cast(bool, options["dry_run"])
-    overwrite = cast(bool, options["overwrite"])
-    screenshare_preprocess = cast(bool, options["screenshare_preprocess"])
-    screenshare_output_dir = cast(Path | None, options["screenshare_output_dir"])
-    screenshare_target_fps = cast(float, options["screenshare_target_fps"])
-    screenshare_roi_seconds = cast(float, options["screenshare_roi_seconds"])
-    screenshare_ssim_threshold = cast(float, options["screenshare_ssim_threshold"])
-    screenshare_bundle_max_frames = cast(int, options["screenshare_bundle_max_frames"])
-    screenshare_bundle_gap = cast(float, options["screenshare_bundle_gap"])
 
     from_date_utc = ensure_utc(from_date, assume_utc_if_naive=True) if from_date else None
     to_date_utc = ensure_utc(to_date, assume_utc_if_naive=True) if to_date else None
@@ -268,7 +291,7 @@ def download(**options: Any) -> None:
             param_hint="--from/--to",
         )
 
-    target_path = Path(target_dir)
+    target_path = config.downloader.target_dir
     if target_path.exists() and not target_path.is_dir():
         raise click.BadParameter(
             "Target path exists and is not a directory.", param_hint="--target-dir"
@@ -281,37 +304,13 @@ def download(**options: Any) -> None:
             "end": end.isoformat(),
             "host_email": redact_identifier(host_email),
             "meeting_id": redact_identifier(meeting_id),
-            "dry_run": dry_run,
-            "overwrite": overwrite,
-            "target_dir": target_dir,
-            "screenshare_preprocess": screenshare_preprocess,
+            "config": config,
         },
     )
 
-    config_factory: Callable[[], PreprocessConfig] | None = None
-    if screenshare_preprocess:
-
-        def _factory() -> PreprocessConfig:
-            return PreprocessConfig(
-                target_fps=screenshare_target_fps,
-                roi_detection_duration_sec=screenshare_roi_seconds,
-                ssim_threshold=screenshare_ssim_threshold,
-                bundle_max_frames=screenshare_bundle_max_frames,
-                bundle_max_time_gap_sec=screenshare_bundle_gap,
-            )
-
-        config_factory = _factory
-
-    post_download = _build_screenshare_post_download(
-        enabled=screenshare_preprocess,
-        dry_run=dry_run,
-        destination_dir=screenshare_output_dir,
-        config_factory=config_factory,
-        logger=logger,
-    )
-
-    client = create_client()
-    downloader = create_downloader(client, logger=logger)
+    post_download = _build_screenshare_post_download(config, logger=logger)
+    client = create_client(config)
+    downloader = create_downloader(config, client)
 
     recordings = client.list_recordings(
         start=start,
@@ -320,15 +319,9 @@ def download(**options: Any) -> None:
         meeting_id=meeting_id,
     )
 
-    downloader.download(
-        recordings,
-        target_path,
-        dry_run=dry_run,
-        overwrite=overwrite,
-        post_download=post_download,
-    )
+    downloader.download(recordings, post_download=post_download)
 
-    if dry_run:
+    if config.downloader.dry_run:
         click.echo(f"Dry run complete. {len(recordings)} recordings would be processed.")
     else:
         click.echo(f"Downloaded {len(recordings)} recordings.")
@@ -399,8 +392,10 @@ def screenshare() -> None:
 def preprocess_command(**options: Any) -> None:
     """Run standalone screenshare preprocessing for a single video."""
     configure_logging(
-        cast(str, options["log_level"]),
-        cast(str, options["log_format"]),
+        LoggingConfig(
+            level=cast(str, options["log_level"]),
+            format=cast(str, options["log_format"]),
+        )
     )
 
     video = cast(Path, options["video"])
@@ -434,30 +429,24 @@ def preprocess_command(**options: Any) -> None:
 
 
 def _build_screenshare_post_download(
+    config: Config,
     *,
-    enabled: bool,
-    dry_run: bool,
-    destination_dir: Path | None,
-    config_factory: Callable[[], PreprocessConfig] | None,
     logger: logging.Logger,
 ) -> Callable[[Path, Recording, RecordingFile], None] | None:
     """Create a post-download hook that runs screenshare preprocessing.
 
     Args:
-        enabled: Whether preprocessing is requested by the caller.
-        dry_run: Whether the downloader is running in dry-run mode.
-        destination_dir: Optional directory for mapping outputs.
-        config_factory: Factory returning the preprocessing configuration.
+        config: Unified application configuration.
         logger: Logger used for structured progress and error reporting.
 
     Returns:
         Callable that performs preprocessing for each recording file, or ``None``
         when preprocessing should be skipped.
     """
-    if not enabled or dry_run or config_factory is None:
+    if not config.screenshare.enabled or config.downloader.dry_run:
         return None
 
-    config = config_factory()
+    preprocess_config = config.screenshare.preprocess_config
 
     def _post_download(
         destination: Path,
@@ -467,10 +456,10 @@ def _build_screenshare_post_download(
         """Process a downloaded recording file to emit screenshare bundles."""
         if not _is_screenshare_file(recording_file):
             return
-        mapping_parent = destination_dir or destination.parent
+        mapping_parent = config.screenshare.output_dir or destination.parent
         mapping_parent.mkdir(parents=True, exist_ok=True)
         try:
-            bundles = preprocess_video(destination, config)
+            bundles = preprocess_video(destination, preprocess_config)
         except PreprocessingError as exc:
             logger.warning(
                 "screenshare.preprocess_failed",

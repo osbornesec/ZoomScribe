@@ -182,14 +182,6 @@ class Recording:
             recording_files=files,
         )
 
-    def iter_files(self) -> tuple[RecordingFile, ...]:
-        """Return the recording files as an immutable tuple.
-
-        Returns:
-            Tuple containing each ``RecordingFile`` associated with the meeting.
-        """
-        return self.recording_files
-
     @property
     def files(self) -> tuple[RecordingFile, ...]:
         """Alias for :attr:`recording_files` to aid readability."""
