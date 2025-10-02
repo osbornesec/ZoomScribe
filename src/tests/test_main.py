@@ -86,14 +86,7 @@ def test_cli_passes_date_filters(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cli_overwrite_option(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Verify the CLI's "download --overwrite" option enables overwrite on the downloader and exits successfully.
-    
-    This test patches OAuth loading, client creation, and downloader creation to inject mocks, runs the CLI command "download --overwrite", and asserts the command exits with code 0 and that downloader.config.overwrite is True.
-    
-    Parameters:
-        monkeypatch (pytest.MonkeyPatch): Fixture used to replace attributes on modules for the duration of the test. No return value.
-    """
+    """CLI propagates the overwrite flag when invoked with `download --overwrite`."""
     client = Mock()
     client.list_recordings.return_value = []
     downloader = Mock()
@@ -143,30 +136,10 @@ def test_cli_configures_logging(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["config"].format.lower() == "json"
 
 
-def test_cli_rejects_file_target_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Verify that the CLI fails when the specified target path is an existing file.
-    
-    Creates a real file at `tmp_path / "existing.txt"`, patches OAuth loading and client/downloader creation to avoid external side effects, then invokes the CLI with the file path as `--target-dir`. Asserts the command exits with a non-zero status and emits a "Target path exists" message.
-    
-    Parameters:
-        tmp_path (Path): Temporary directory provided by pytest; used to create the existing file.
-        monkeypatch (pytest.MonkeyPatch): Fixture used to replace functions to avoid network/IO.
-    
-    Returns:
-        None
-    
-    Side effects:
-        - Writes a file named "existing.txt" under `tmp_path`.
-        - Monkeypatches `zoom_scribe.main.load_oauth_credentials`, `create_client`, and `create_downloader`.
-        - Runs the CLI via Click's CliRunner.
-    
-    Preconditions:
-        - The test environment permits creating files under `tmp_path`.
-    
-    Thread safety:
-        - Test uses monkeypatch and CliRunner and is not safe to run concurrently with other tests that patch the same attributes.
-    """
+def test_cli_rejects_file_target_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI exits with an error when `--target-dir` points to an existing file."""
     file_path = tmp_path / "existing.txt"
     file_path.write_text("content", encoding="utf-8")
 

@@ -29,16 +29,10 @@ PostDownloadHook = Callable[[Path, "Recording", "RecordingFile"], None]
 
 
 def _sanitize(value: str) -> str:
-    """
-    Produce a filesystem-safe path component from the given string.
-    
-    Replaces characters disallowed by the module's sanitization pattern with underscores; collapses runs of three or more underscores to two. If the input (after replacement) is empty, returns "unknown". If the resulting string consists only of one or more periods, returns "_".
-    
-    Parameters:
-        value (str): Input string to sanitize; may be empty.
-    
-    Returns:
-        str: A sanitized string safe for use as a single filesystem path component.
+    """Return a filesystem-safe path component derived from ``value``.
+
+    Replaces disallowed characters with underscores, collapses long runs, and falls back to
+    ``"unknown"`` or ``"_"`` when the sanitized output would otherwise be empty.
     """
     sanitized = _SANITIZE_PATTERN.sub("_", value or "")
     if not sanitized:
@@ -98,26 +92,10 @@ class RecordingDownloader:
         *,
         post_download: PostDownloadHook | None = None,
     ) -> None:
-        """
-        Download the given recordings to the configured target directory.
-        
-        Processes each Recording.files entry and persists files under self.config.target_dir according to downloader configuration. When not in dry-run mode, downloads are performed concurrently up to self.max_workers and written atomically; when dry-run is enabled, no IO is performed and progress entries are emitted.
-        
-        Parameters:
-            recordings (Sequence[Recording]): Sequence of recordings to process; each recording's .files will be considered.
-            post_download (PostDownloadHook | None): Optional callback invoked after a file is processed (including when a file is skipped). Not called during dry runs.
-        
-        Side effects:
-            - Creates directories and writes files under self.config.target_dir.
-            - Emits progress and audit logs for each file.
-            - Invokes post_download for each processed file (except in dry-run).
-        
-        Preconditions / concurrency:
-            - Observes self.config.overwrite to determine whether existing files are replaced.
-            - Uses a ThreadPoolExecutor with up to self.max_workers concurrent workers.
-        
-        Raises:
-            DownloadError: If any file fails to download or persist; remaining pending downloads are cancelled.
+        """Download each recording's files to the configured target directory.
+
+        Honours dry-run and overwrite settings, uses a thread pool for concurrency, invokes the
+        optional ``post_download`` hook, and raises ``DownloadError`` if any transfer fails.
         """
         if not recordings:
             self.logger.info("downloader.empty_collection", extra={"count": 0})

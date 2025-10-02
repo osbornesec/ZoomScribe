@@ -270,39 +270,10 @@ def build_config(**options: Any) -> Config:
     help="Logging output format",
 )
 def download(**options: Any) -> None:
-    """
-    Execute the CLI workflow to fetch and (optionally) download Zoom recordings and run optional post-download screenshare preprocessing.
-    
-    This function:
-    - Builds an application Config from CLI options and configures logging.
-    - Validates and normalizes the requested date range and the downloader target directory.
-    - Logs a structured invocation event with redacted identifiers.
-    - Creates a Zoom API client and a RecordingDownloader, queries recordings within the computed start/end range, and invokes the downloader to process each recording.
-    - Optionally runs a screenshare preprocessing hook for each downloaded file when configured.
-    - Writes a summary message to stdout indicating the number of recordings that would be processed in dry-run mode or that were downloaded.
-    
-    Parameters:
-        **options: Any
-            Arbitrary keyword options provided by the CLI. Expected keys (may be None):
-            - "from_date" (datetime | None): inclusive lower bound for recordings.
-            - "to_date" (datetime | None): inclusive upper bound for recordings.
-            - "host_email" (str | None): filter recordings by host email.
-            - "meeting_id" (str | None): filter recordings by meeting identifier.
-            Other CLI-derived settings are consumed by build_config and the resulting Config object.
-    
-    Raises:
-        click.BadParameter:
-            If the resolved start date is after the end date, or if the configured target path exists and is not a directory.
-    
-    Side effects:
-        - Configures global logging for the application namespace.
-        - May perform network requests to the Zoom API and write downloaded recording files to disk.
-        - May run screenshare preprocessing and write mapping files.
-        - Prints a summary message to stdout.
-    
-    Preconditions / invariants:
-        - Date inputs (if provided) are normalized to UTC; if omitted, defaults are used (end defaults to now, start defaults to 30 days before now).
-        - Logging configuration and downloader target directory are derived from the built Config.
+    """Run the download workflow for Zoom recordings.
+
+    Builds the Config from CLI options, validates dates and target paths, downloads recordings,
+    runs optional screenshare preprocessing, and prints a summary of the work performed.
     """
     config = build_config(**options)
     logger = configure_logging(config.logging)
@@ -424,31 +395,10 @@ def screenshare() -> None:
     help="Logging output format",
 )
 def preprocess_command(**options: Any) -> None:
-    """
-    Run standalone screenshare preprocessing for a single video.
-    
-    Processes the specified input video according to preprocessing options, builds a frame-to-time mapping from detected bundles, and either writes that mapping to an output file or prints it to stdout.
-    
-    Parameters:
-        **options: dict
-            Expected keys:
-            - video (Path): Path to the input video file to preprocess.
-            - output (Path | None): Optional path to write the frame mapping; if omitted, mapping is printed.
-            - target_fps (float): Target frames-per-second used for preprocessing.
-            - roi_seconds (float): Duration (in seconds) used for ROI detection.
-            - ssim_threshold (float): SSIM threshold for bundle detection.
-            - bundle_max_frames (int): Maximum frames per bundle.
-            - bundle_gap (float): Maximum time gap (in seconds) between frames to consider them in the same bundle.
-            - log_level (str): Logging level name used to configure logging.
-            - log_format (str): Logging format ("auto", "json", or "text").
-    
-    Side effects:
-        - Configures module logging according to provided logging options.
-        - May create parent directories for the specified output file.
-        - Writes the frame mapping file (when `output` is provided) or prints mapping to stdout.
-    
-    Raises:
-        click.ClickException: If preprocessing fails or if writing the output file fails.
+    """Process a single video and emit the frame-to-time mapping.
+
+    Configures logging, runs preprocessing with the provided options, then writes or prints the
+    computed mapping.
     """
     configure_logging(
         LoggingConfig(

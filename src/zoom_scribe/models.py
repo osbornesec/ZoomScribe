@@ -95,24 +95,7 @@ class RecordingFile:
 
     @classmethod
     def from_api(cls, payload: JsonMapping) -> RecordingFile:
-        """
-        Create a RecordingFile from a Zoom API payload.
-        
-        Normalizes and validates payload fields:
-        - Ensures `id`, `file_type`, and `download_url` are present and non-empty.
-        - Derives `file_extension` from `file_extension` or `file_type`, lowercases it and strips any leading dot.
-        - Normalizes `download_access_token` and `status` to a trimmed string or `None`.
-        - Converts numeric `file_size` to an `int`; leaves it `None` if absent or not numeric.
-        
-        Parameters:
-            payload: JSON mapping returned by the Zoom API describing a recording file.
-        
-        Returns:
-            A RecordingFile populated with validated and normalized fields.
-        
-        Raises:
-            ModelValidationError: If a required field (`id`, `file_type`, or `download_url`) is missing or empty.
-        """
+        """Build a RecordingFile from a Zoom API payload after normalizing key fields."""
         file_extension = payload.get("file_extension") or payload.get("file_type") or ""
         download_access_token = _normalise_optional_str(payload.get("download_access_token"))
         status = _normalise_optional_str(payload.get("status"))
@@ -205,15 +188,7 @@ class RecordingPage:
 
     @classmethod
     def from_api(cls, payload: JsonMapping) -> RecordingPage:
-        """
-        Create a RecordingPage from a Zoom API paginated recordings response.
-        
-        Parameters:
-            payload (JsonMapping): JSON object returned by the users/*/recordings endpoint; expected to contain a "meetings" list and optional "next_page_token" and "total_records" fields.
-        
-        Returns:
-            RecordingPage: Instance whose `recordings` are the parsed meetings, `next_page_token` is a normalized string or `None`, and `total_records` is an `int` when the payload contained a numeric value or `None` otherwise.
-        """
+        """Parse a paginated recordings response into a RecordingPage instance."""
         meetings_payload = payload.get("meetings") or []
         recordings = tuple(Recording.from_api(meeting) for meeting in meetings_payload)
         next_page_token = _normalise_optional_str(payload.get("next_page_token"))
