@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -83,6 +83,44 @@ def test_cli_passes_date_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     start, end, _, _ = client_instance.calls[0]
     assert start.year == 2025 and start.day == 1
     assert end.year == 2025 and end.day == 15
+
+
+def test_cli_to_date_only_defaults_relative_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[datetime, datetime]] = []
+
+        def list_recordings(
+            self,
+            *,
+            start: datetime,
+            end: datetime,
+            host_email: str | None = None,
+            meeting_id: str | None = None,
+        ) -> list[str]:
+            _ = (host_email, meeting_id)
+            self.calls.append((start, end))
+            return []
+
+    client_instance = FakeClient()
+    downloader = Mock()
+
+    monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client_instance)
+    monkeypatch.setattr(
+        "zoom_scribe.main.create_downloader",
+        lambda _, __: downloader,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["download", "--to", "2025-09-15"])
+
+    assert result.exit_code == 0
+    assert client_instance.calls
+    start, end = client_instance.calls[0]
+    assert end.year == 2025 and end.month == 9 and end.day == 15
+    assert end - start == timedelta(days=30)
+    assert start <= end
 
 
 def test_cli_overwrite_option(monkeypatch: pytest.MonkeyPatch) -> None:

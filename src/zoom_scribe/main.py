@@ -288,7 +288,7 @@ def download(**options: Any) -> None:
 
     now = datetime.now(UTC)
     end = to_date_utc or now
-    start = from_date_utc or (now - timedelta(days=30))
+    start = from_date_utc or (end - timedelta(days=30))
 
     if start > end:
         raise click.BadParameter(
