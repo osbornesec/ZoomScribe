@@ -34,3 +34,4 @@
 
 ## Automation & Review
 - At the end of each change cycle, run `coderabbit review --base master --prompt-only -t all` (allow up to 15 minutes) and address the reported findings.
+- Before pushing any branch, run `.venv/bin/black .` (or the `format` Make target) so Black formatting checks pass in CI.
