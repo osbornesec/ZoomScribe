@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -10,35 +11,43 @@ from zoom_scribe.config import DownloaderConfig
 from zoom_scribe.downloader import DownloadError, RecordingDownloader, _sanitize
 from zoom_scribe.models import Recording
 
+RecordingFactory = Callable[[str], Recording]
+
 
 @pytest.fixture
-def sample_recording() -> Recording:
-    payload: dict[str, Any] = {
-        "uuid": "uuid-1",
-        "topic": "Project / Kickoff?",
-        "host_email": "host@example.com",
-        "start_time": "2025-09-28T10:00:00Z",
-        "recording_files": [
-            {
-                "id": "file-1",
-                "file_type": "MP4",
-                "file_extension": "mp4",
-                "download_url": "https://zoom.us/download/file-1",
-                "download_access_token": "token",
-            }
-        ],
-    }
-    return Recording.from_api(payload)
+def recording_factory() -> RecordingFactory:
+    """Return a factory for creating sample ``Recording`` instances."""
+
+    def _factory(uuid: str) -> Recording:
+        payload: dict[str, Any] = {
+            "uuid": uuid,
+            "topic": "Project / Kickoff?",
+            "host_email": "host@example.com",
+            "start_time": "2025-09-28T10:00:00Z",
+            "recording_files": [
+                {
+                    "id": f"file-{uuid}",
+                    "file_type": "MP4",
+                    "file_extension": "mp4",
+                    "download_url": f"https://zoom.us/download/{uuid}",
+                    "download_access_token": "token",
+                }
+            ],
+        }
+        return Recording.from_api(payload)
+
+    return _factory
 
 
-def test_build_file_path_sanitizes_components(sample_recording: Recording) -> None:
+def test_build_file_path_sanitizes_components(
+    recording_factory: RecordingFactory,
+) -> None:
+    sample_recording = recording_factory("uuid-1")
     config = DownloaderConfig()
     downloader = RecordingDownloader(Mock(), config=config)
     recording_file = sample_recording.files[0]
 
-    destination = downloader.build_file_path(
-        sample_recording, recording_file, Path("/downloads")
-    )
+    destination = downloader.build_file_path(sample_recording, recording_file, Path("/downloads"))
 
     path_str = destination.as_posix()
     assert "/downloads" in path_str
@@ -49,8 +58,9 @@ def test_build_file_path_sanitizes_components(sample_recording: Recording) -> No
 
 
 def test_download_creates_directories_and_writes_files(
-    tmp_path: Path, sample_recording: Recording
+    tmp_path: Path, recording_factory: RecordingFactory
 ) -> None:
+    sample_recording = recording_factory("uuid-1")
     client = Mock()
     client.download_recording_file.return_value = b"binary-data"
     config = DownloaderConfig(target_dir=tmp_path)
@@ -67,8 +77,9 @@ def test_download_creates_directories_and_writes_files(
 
 
 def test_download_skips_existing_file_without_overwrite(
-    tmp_path: Path, sample_recording: Recording
+    tmp_path: Path, recording_factory: RecordingFactory
 ) -> None:
+    sample_recording = recording_factory("uuid-1")
     client = Mock()
     config = DownloaderConfig(target_dir=tmp_path, overwrite=False)
     downloader = RecordingDownloader(client, config=config, max_workers=1)
@@ -85,8 +96,9 @@ def test_download_skips_existing_file_without_overwrite(
 
 
 def test_download_overwrites_when_requested(
-    tmp_path: Path, sample_recording: Recording
+    tmp_path: Path, recording_factory: RecordingFactory
 ) -> None:
+    sample_recording = recording_factory("uuid-1")
     client = Mock()
     client.download_recording_file.return_value = b"new-data"
     config = DownloaderConfig(target_dir=tmp_path, overwrite=True)
@@ -103,7 +115,8 @@ def test_download_overwrites_when_requested(
     assert destination.read_bytes() == b"new-data"
 
 
-def test_download_in_dry_run_mode(tmp_path: Path, sample_recording: Recording) -> None:
+def test_download_in_dry_run_mode(tmp_path: Path, recording_factory: RecordingFactory) -> None:
+    sample_recording = recording_factory("uuid-1")
     client = Mock()
     config = DownloaderConfig(target_dir=tmp_path, dry_run=True)
     downloader = RecordingDownloader(client, config=config, max_workers=1)
@@ -129,8 +142,9 @@ def test_download_in_dry_run_mode(tmp_path: Path, sample_recording: Recording) -
 def test_download_cleans_temp_on_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    sample_recording: Recording,
+    recording_factory: RecordingFactory,
 ) -> None:
+    sample_recording = recording_factory("uuid-1")
     client = Mock()
     client.download_recording_file.return_value = b"binary-data"
     config = DownloaderConfig(target_dir=tmp_path)
@@ -157,7 +171,9 @@ def test_sanitize_replaces_dot_only_values(value: str) -> None:
     assert _sanitize(value) == "_"
 
 
-def test_concurrent_downloads_are_thread_safe(tmp_path: Path) -> None:
+def test_concurrent_downloads_are_thread_safe(
+    tmp_path: Path, recording_factory: RecordingFactory
+) -> None:
     """Ensure multiple files can be downloaded concurrently without race conditions."""
     call_count = 0
     call_lock = Lock()
@@ -176,24 +192,7 @@ def test_concurrent_downloads_are_thread_safe(tmp_path: Path) -> None:
     client.download_recording_file.side_effect = download_with_delay
 
     # Create multiple recordings to download in parallel
-    recordings: list[Recording] = []
-    for i in range(5):
-        payload: dict[str, Any] = {
-            "uuid": f"uuid-{i}",
-            "topic": f"Meeting {i}",
-            "host_email": "host@example.com",
-            "start_time": "2025-09-28T10:00:00Z",
-            "recording_files": [
-                {
-                    "id": f"file-{i}",
-                    "file_type": "MP4",
-                    "file_extension": "mp4",
-                    "download_url": f"https://zoom.us/download/file-{i}",
-                    "download_access_token": "token",
-                }
-            ],
-        }
-        recordings.append(Recording.from_api(payload))
+    recordings = [recording_factory(f"uuid-{i}") for i in range(5)]
 
     config = DownloaderConfig(target_dir=tmp_path)
     downloader = RecordingDownloader(client, config=config, max_workers=3)
@@ -212,8 +211,9 @@ def test_concurrent_downloads_are_thread_safe(tmp_path: Path) -> None:
 
 
 def test_download_invokes_post_download_hook(
-    tmp_path: Path, sample_recording: Recording
+    tmp_path: Path, recording_factory: RecordingFactory
 ) -> None:
+    sample_recording = recording_factory("uuid-1")
     client = Mock()
     client.download_recording_file.return_value = b"binary-data"
     config = DownloaderConfig(target_dir=tmp_path)
@@ -230,7 +230,5 @@ def test_download_invokes_post_download_hook(
 
     assert calls
     recording_file = sample_recording.files[0]
-    expected_path = downloader.build_file_path(
-        sample_recording, recording_file, tmp_path
-    )
+    expected_path = downloader.build_file_path(sample_recording, recording_file, tmp_path)
     assert calls[0] == expected_path

@@ -282,8 +282,9 @@ def download(**options: Any) -> None:
     from_date_utc = ensure_utc(from_date, assume_utc_if_naive=True) if from_date else None
     to_date_utc = ensure_utc(to_date, assume_utc_if_naive=True) if to_date else None
 
-    end = to_date_utc or datetime.now(UTC)
-    start = from_date_utc or (end - timedelta(days=30))
+    now = datetime.now(UTC)
+    end = to_date_utc or now
+    start = from_date_utc or (now - timedelta(days=30))
 
     if start > end:
         raise click.BadParameter(
@@ -420,9 +421,7 @@ def preprocess_command(**options: Any) -> None:
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(mapping + "\n", encoding="utf-8")
         except OSError as exc:  # pragma: no cover - filesystem dependent
-            raise click.ClickException(
-                f"Failed to write frame mapping to {output}: {exc}"
-            ) from exc
+            raise click.ClickException(f"Failed to write frame mapping to {output}: {exc}") from exc
         click.echo(f"Frame mapping written to {output}")
     else:
         click.echo(mapping)

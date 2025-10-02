@@ -110,7 +110,7 @@ class RecordingFile:
         download_access_token = _normalise_optional_str(payload.get("download_access_token"))
         status = _normalise_optional_str(payload.get("status"))
         file_size_raw = payload.get("file_size")
-        file_size = int(file_size_raw) if isinstance(file_size_raw, (int, float)) else None
+        file_size = int(file_size_raw) if isinstance(file_size_raw, int | float) else None
         return cls(
             id=str(_ensure_required(payload, "id")),
             file_type=str(_ensure_required(payload, "file_type")),
@@ -172,7 +172,7 @@ class Recording:
         meeting_topic = topic_value or _normalise_optional_str(payload.get("meeting_topic")) or ""
         host_email = _normalise_optional_str(payload.get("host_email")) or ""
         duration_raw = payload.get("duration")
-        duration_minutes = int(duration_raw) if isinstance(duration_raw, (int, float)) else None
+        duration_minutes = int(duration_raw) if isinstance(duration_raw, int | float) else None
         return cls(
             uuid=str(_ensure_required(payload, "uuid")),
             meeting_topic=meeting_topic,
@@ -211,7 +211,7 @@ class RecordingPage:
         next_page_token = _normalise_optional_str(payload.get("next_page_token"))
         total_records_raw = payload.get("total_records")
         total_records = (
-            int(total_records_raw) if isinstance(total_records_raw, (int, float)) else None
+            int(total_records_raw) if isinstance(total_records_raw, int | float) else None
         )
         return cls(
             recordings=recordings,

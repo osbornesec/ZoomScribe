@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
@@ -9,6 +10,9 @@ from pathlib import Path
 from typing import IO, Any, cast
 
 from .screenshare.preprocess import PreprocessConfig
+
+_LOGGER = logging.getLogger(__name__)
+
 
 try:  # pragma: no cover - imported lazily in production environments
     from dotenv import find_dotenv, load_dotenv
@@ -157,6 +161,7 @@ def load_oauth_credentials(
         else:
             resolved_path = find_dotenv(raise_error_if_not_found=False)
         if resolved_path:
+            _LOGGER.debug("config.load_dotenv", extra={"path": resolved_path})
             load_dotenv(resolved_path, override=False)
 
     account_id = env.get(ENV_ACCOUNT_ID)
@@ -187,11 +192,11 @@ __all__ = [
     "ENV_ACCOUNT_ID",
     "ENV_CLIENT_ID",
     "ENV_CLIENT_SECRET",
-    "ConfigurationError",
-    "OAuthCredentials",
-    "load_oauth_credentials",
     "Config",
-    "LoggingConfig",
+    "ConfigurationError",
     "DownloaderConfig",
+    "LoggingConfig",
+    "OAuthCredentials",
     "ScreenshareConfig",
+    "load_oauth_credentials",
 ]

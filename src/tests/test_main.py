@@ -30,10 +30,10 @@ def test_cli_invokes_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
     downloader.config = DownloaderConfig(dry_run=True)
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: client)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: downloader,
+        lambda _, __: downloader,
     )
 
     runner = CliRunner()
@@ -66,10 +66,10 @@ def test_cli_passes_date_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     downloader = Mock()
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: client_instance)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client_instance)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: downloader,
+        lambda _, __: downloader,
     )
 
     runner = CliRunner()
@@ -92,10 +92,10 @@ def test_cli_overwrite_option(monkeypatch: pytest.MonkeyPatch) -> None:
     downloader.config = DownloaderConfig(overwrite=True)
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: client)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: downloader,
+        lambda _, __: downloader,
     )
 
     runner = CliRunner()
@@ -118,10 +118,10 @@ def test_cli_configures_logging(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
     monkeypatch.setattr("zoom_scribe.main.configure_logging", fake_configure)
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: client)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: downloader,
+        lambda _, __: downloader,
     )
 
     runner = CliRunner()
@@ -140,10 +140,10 @@ def test_cli_rejects_file_target_dir(tmp_path: Path, monkeypatch: pytest.MonkeyP
     file_path.write_text("content", encoding="utf-8")
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: Mock())
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: Mock())
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: Mock(),
+        lambda _, __: Mock(),
     )
 
     runner = CliRunner()
@@ -160,10 +160,10 @@ def test_cli_enables_screenshare_preprocess(monkeypatch: pytest.MonkeyPatch) -> 
     downloader.config = DownloaderConfig()
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: client)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: downloader,
+        lambda _, __: downloader,
     )
 
     runner = CliRunner()

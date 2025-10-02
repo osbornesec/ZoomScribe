@@ -8,7 +8,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Any, Final, cast
+from typing import Any, Final
 from urllib.parse import quote, urljoin, urlparse
 
 import requests
@@ -679,7 +679,7 @@ class ZoomAPIClient:
             return None
         if isinstance(timeout, bool):
             raise TypeError("Timeout must be a float, tuple, or None")
-        if isinstance(timeout, (int, float)):
+        if isinstance(timeout, int | float):
             numeric_timeout = float(timeout)
             if numeric_timeout < 0:
                 raise ValueError("Timeout must be non-negative")
@@ -690,7 +690,7 @@ class ZoomAPIClient:
             connect, read = timeout
             normalized: list[float] = []
             for component in (connect, read):
-                if isinstance(component, bool) or not isinstance(component, (int, float)):
+                if isinstance(component, bool) or not isinstance(component, int | float):
                     raise TypeError("Timeout tuple values must be numeric")
                 numeric_component = float(component)
                 if numeric_component < 0:
