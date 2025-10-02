@@ -7,10 +7,10 @@ import logging
 import os
 import re
 import sys
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import IO, Any, Protocol, runtime_checkable
+from typing import IO
 
 from ._redact import redact_identifier, redact_uuid
 from .client import ZoomAPIClient
@@ -29,12 +29,18 @@ PostDownloadHook = Callable[[Path, "Recording", "RecordingFile"], None]
 
 
 def _sanitize(value: str) -> str:
-    """Sanitize a path component so it is safe to use on local filesystems."""
+    """Return a filesystem-safe path component derived from ``value``.
+
+    Replaces disallowed characters with underscores, collapses long runs, and falls back to
+    ``"unknown"`` or ``"_"`` when the sanitized output would otherwise be empty.
+    """
     sanitized = _SANITIZE_PATTERN.sub("_", value or "")
-    if sanitized and set(sanitized) <= {"."}:
-        sanitized = "_"
+    if not sanitized:
+        return "unknown"
+    if set(sanitized) <= {"."}:
+        return "_"
     sanitized = re.sub(r"_{3,}", "__", sanitized)
-    return sanitized or "unknown"
+    return sanitized
 
 
 class RecordingDownloader:
@@ -86,13 +92,15 @@ class RecordingDownloader:
         *,
         post_download: PostDownloadHook | None = None,
     ) -> None:
-        """Download the supplied recordings into ``target_dir`` respecting flags.
+        """Download each recording's files to the configured target directory.
 
-        Args:
-            recordings: Collection of meeting recordings to persist.
-            post_download: Optional callback invoked after each recording file is
-                processed (including skips). Not executed during dry runs.
+        Honours dry-run and overwrite settings, uses a thread pool for concurrency, invokes the
+        optional ``post_download`` hook, and raises ``DownloadError`` if any transfer fails.
         """
+        if not recordings:
+            self.logger.info("downloader.empty_collection", extra={"count": 0})
+            return
+
         if self.config.dry_run:
             for recording in recordings:
                 for recording_file in recording.files:

@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -30,10 +30,10 @@ def test_cli_invokes_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
     downloader.config = DownloaderConfig(dry_run=True)
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: client)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: downloader,
+        lambda _, __: downloader,
     )
 
     runner = CliRunner()
@@ -66,10 +66,10 @@ def test_cli_passes_date_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     downloader = Mock()
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: client_instance)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client_instance)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: downloader,
+        lambda _, __: downloader,
     )
 
     runner = CliRunner()
@@ -85,17 +85,56 @@ def test_cli_passes_date_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     assert end.year == 2025 and end.day == 15
 
 
+def test_cli_to_date_only_defaults_relative_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[datetime, datetime]] = []
+
+        def list_recordings(
+            self,
+            *,
+            start: datetime,
+            end: datetime,
+            host_email: str | None = None,
+            meeting_id: str | None = None,
+        ) -> list[str]:
+            _ = (host_email, meeting_id)
+            self.calls.append((start, end))
+            return []
+
+    client_instance = FakeClient()
+    downloader = Mock()
+
+    monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client_instance)
+    monkeypatch.setattr(
+        "zoom_scribe.main.create_downloader",
+        lambda _, __: downloader,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["download", "--to", "2025-09-15"])
+
+    assert result.exit_code == 0
+    assert client_instance.calls
+    start, end = client_instance.calls[0]
+    assert end.year == 2025 and end.month == 9 and end.day == 15
+    assert end - start == timedelta(days=30)
+    assert start <= end
+
+
 def test_cli_overwrite_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLI propagates the overwrite flag when invoked with `download --overwrite`."""
     client = Mock()
     client.list_recordings.return_value = []
     downloader = Mock()
     downloader.config = DownloaderConfig(overwrite=True)
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: client)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: downloader,
+        lambda _, __: downloader,
     )
 
     runner = CliRunner()
@@ -118,10 +157,10 @@ def test_cli_configures_logging(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
     monkeypatch.setattr("zoom_scribe.main.configure_logging", fake_configure)
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: client)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: downloader,
+        lambda _, __: downloader,
     )
 
     runner = CliRunner()
@@ -136,14 +175,15 @@ def test_cli_configures_logging(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cli_rejects_file_target_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLI exits with an error when `--target-dir` points to an existing file."""
     file_path = tmp_path / "existing.txt"
     file_path.write_text("content", encoding="utf-8")
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: Mock())
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: Mock())
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: Mock(),
+        lambda _, __: Mock(),
     )
 
     runner = CliRunner()
@@ -160,10 +200,10 @@ def test_cli_enables_screenshare_preprocess(monkeypatch: pytest.MonkeyPatch) -> 
     downloader.config = DownloaderConfig()
 
     monkeypatch.setattr("zoom_scribe.main.load_oauth_credentials", lambda: Mock())
-    monkeypatch.setattr("zoom_scribe.main.create_client", lambda config: client)
+    monkeypatch.setattr("zoom_scribe.main.create_client", lambda _: client)
     monkeypatch.setattr(
         "zoom_scribe.main.create_downloader",
-        lambda config, client: downloader,
+        lambda _, __: downloader,
     )
 
     runner = CliRunner()

@@ -270,7 +270,11 @@ def build_config(**options: Any) -> Config:
     help="Logging output format",
 )
 def download(**options: Any) -> None:
-    """Run the CLI workflow to fetch and optionally download Zoom recordings."""
+    """Run the download workflow for Zoom recordings.
+
+    Builds the Config from CLI options, validates dates and target paths, downloads recordings,
+    runs optional screenshare preprocessing, and prints a summary of the work performed.
+    """
     config = build_config(**options)
     logger = configure_logging(config.logging)
 
@@ -282,7 +286,8 @@ def download(**options: Any) -> None:
     from_date_utc = ensure_utc(from_date, assume_utc_if_naive=True) if from_date else None
     to_date_utc = ensure_utc(to_date, assume_utc_if_naive=True) if to_date else None
 
-    end = to_date_utc or datetime.now(UTC)
+    now = datetime.now(UTC)
+    end = to_date_utc or now
     start = from_date_utc or (end - timedelta(days=30))
 
     if start > end:
@@ -390,7 +395,11 @@ def screenshare() -> None:
     help="Logging output format",
 )
 def preprocess_command(**options: Any) -> None:
-    """Run standalone screenshare preprocessing for a single video."""
+    """Process a single video and emit the frame-to-time mapping.
+
+    Configures logging, runs preprocessing with the provided options, then writes or prints the
+    computed mapping.
+    """
     configure_logging(
         LoggingConfig(
             level=cast(str, options["log_level"]),
@@ -420,9 +429,7 @@ def preprocess_command(**options: Any) -> None:
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(mapping + "\n", encoding="utf-8")
         except OSError as exc:  # pragma: no cover - filesystem dependent
-            raise click.ClickException(
-                f"Failed to write frame mapping to {output}: {exc}"
-            ) from exc
+            raise click.ClickException(f"Failed to write frame mapping to {output}: {exc}") from exc
         click.echo(f"Frame mapping written to {output}")
     else:
         click.echo(mapping)

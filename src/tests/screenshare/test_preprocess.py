@@ -129,9 +129,7 @@ def test_detect_roi_success(synthetic_video: Path, default_config: PreprocessCon
     assert 0.0 <= roi.confidence <= 1.0
 
 
-def test_detect_roi_missing_file(
-    tmp_path: Path, default_config: PreprocessConfig
-) -> None:
+def test_detect_roi_missing_file(tmp_path: Path, default_config: PreprocessConfig) -> None:
     missing_path = tmp_path / "nonexistent.mp4"
     with pytest.raises(PreprocessingError):
         detect_roi(missing_path, default_config)
@@ -243,9 +241,7 @@ def test_preprocess_video_with_custom_config(synthetic_video: Path) -> None:
     assert all(len(bundle.frame_indices) <= 3 for bundle in bundles)
 
 
-def test_preprocess_video_missing_file(
-    tmp_path: Path, default_config: PreprocessConfig
-) -> None:
+def test_preprocess_video_missing_file(tmp_path: Path, default_config: PreprocessConfig) -> None:
     missing_path = tmp_path / "nonexistent.mp4"
     with pytest.raises(PreprocessingError):
         preprocess_video(missing_path, default_config)

@@ -95,22 +95,12 @@ class RecordingFile:
 
     @classmethod
     def from_api(cls, payload: JsonMapping) -> RecordingFile:
-        """Create a ``RecordingFile`` instance from a Zoom API payload.
-
-        Args:
-            payload: JSON object returned by the Zoom API describing a file.
-
-        Returns:
-            Parsed ``RecordingFile`` model populated with validated fields.
-
-        Raises:
-            ModelValidationError: If required fields are missing.
-        """
+        """Build a RecordingFile from a Zoom API payload after normalizing key fields."""
         file_extension = payload.get("file_extension") or payload.get("file_type") or ""
         download_access_token = _normalise_optional_str(payload.get("download_access_token"))
         status = _normalise_optional_str(payload.get("status"))
         file_size_raw = payload.get("file_size")
-        file_size = int(file_size_raw) if isinstance(file_size_raw, (int, float)) else None
+        file_size = int(file_size_raw) if isinstance(file_size_raw, int | float) else None
         return cls(
             id=str(_ensure_required(payload, "id")),
             file_type=str(_ensure_required(payload, "file_type")),
@@ -172,7 +162,7 @@ class Recording:
         meeting_topic = topic_value or _normalise_optional_str(payload.get("meeting_topic")) or ""
         host_email = _normalise_optional_str(payload.get("host_email")) or ""
         duration_raw = payload.get("duration")
-        duration_minutes = int(duration_raw) if isinstance(duration_raw, (int, float)) else None
+        duration_minutes = int(duration_raw) if isinstance(duration_raw, int | float) else None
         return cls(
             uuid=str(_ensure_required(payload, "uuid")),
             meeting_topic=meeting_topic,
@@ -198,20 +188,13 @@ class RecordingPage:
 
     @classmethod
     def from_api(cls, payload: JsonMapping) -> RecordingPage:
-        """Parse a paginated recordings response into a ``RecordingPage``.
-
-        Args:
-            payload: JSON object returned from the ``users/*/recordings`` endpoint.
-
-        Returns:
-            Normalised ``RecordingPage`` encapsulating recordings and pagination token.
-        """
+        """Parse a paginated recordings response into a RecordingPage instance."""
         meetings_payload = payload.get("meetings") or []
         recordings = tuple(Recording.from_api(meeting) for meeting in meetings_payload)
         next_page_token = _normalise_optional_str(payload.get("next_page_token"))
         total_records_raw = payload.get("total_records")
         total_records = (
-            int(total_records_raw) if isinstance(total_records_raw, (int, float)) else None
+            int(total_records_raw) if isinstance(total_records_raw, int | float) else None
         )
         return cls(
             recordings=recordings,

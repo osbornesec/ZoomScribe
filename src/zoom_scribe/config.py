@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
@@ -9,6 +10,9 @@ from pathlib import Path
 from typing import IO, Any, cast
 
 from .screenshare.preprocess import PreprocessConfig
+
+_LOGGER = logging.getLogger(__name__)
+
 
 try:  # pragma: no cover - imported lazily in production environments
     from dotenv import find_dotenv, load_dotenv
@@ -131,20 +135,11 @@ def load_oauth_credentials(
     dotenv_path: str | os.PathLike[str] | None = None,
     environ: Mapping[str, str | None] | None = None,
 ) -> OAuthCredentials:
-    """Load Zoom OAuth credentials from the environment and optional ``.env`` file.
+    """Load Zoom OAuth credentials from the environment or an optional dotenv file.
 
-    Args:
-        dotenv_path: Optional path to a dotenv file. When supplied, the file is
-            loaded before reading environment variables. The default behaviour
-            mirrors :func:`python_dotenv.find_dotenv`.
-        environ: Optional mapping used instead of :data:`os.environ`. Primarily
-            intended for testing.
-
-    Returns:
-        Loaded :class:`OAuthCredentials` instance with validated values.
-
-    Raises:
-        ConfigurationError: When any credential is missing.
+    Ensures ``account_id``, ``client_id``, and ``client_secret`` are present, raising
+    ``ConfigurationError`` when any value is missing. ``dotenv_path`` and ``environ`` allow tests to
+    override discovery.
     """
     env: MutableMapping[str, str | None]
     if environ is not None:
@@ -157,6 +152,7 @@ def load_oauth_credentials(
         else:
             resolved_path = find_dotenv(raise_error_if_not_found=False)
         if resolved_path:
+            _LOGGER.debug("config.load_dotenv", extra={"path": resolved_path})
             load_dotenv(resolved_path, override=False)
 
     account_id = env.get(ENV_ACCOUNT_ID)
@@ -187,11 +183,11 @@ __all__ = [
     "ENV_ACCOUNT_ID",
     "ENV_CLIENT_ID",
     "ENV_CLIENT_SECRET",
-    "ConfigurationError",
-    "OAuthCredentials",
-    "load_oauth_credentials",
     "Config",
-    "LoggingConfig",
+    "ConfigurationError",
     "DownloaderConfig",
+    "LoggingConfig",
+    "OAuthCredentials",
     "ScreenshareConfig",
+    "load_oauth_credentials",
 ]
