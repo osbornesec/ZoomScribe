@@ -1,11 +1,14 @@
-"""Environment configuration utilities for Zoom S2S OAuth credentials."""
+"""Configuration models and utilities for ZoomScribe."""
 
 from __future__ import annotations
 
 import os
 from collections.abc import Mapping, MutableMapping
-from dataclasses import dataclass
-from typing import IO, cast
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import IO, Any, cast
+
+from .screenshare.preprocess import PreprocessConfig
 
 try:  # pragma: no cover - imported lazily in production environments
     from dotenv import find_dotenv, load_dotenv
@@ -48,6 +51,43 @@ def _mask(value: str) -> str:
     if len(value) <= REDACTION_SUFFIX_LENGTH:
         return "***"
     return f"***{value[-REDACTION_SUFFIX_LENGTH:]}"
+
+
+@dataclass(frozen=True, slots=True)
+class LoggingConfig:
+    """Structured logging configuration."""
+
+    level: str = "info"
+    format: str = "auto"
+
+
+@dataclass(frozen=True, slots=True)
+class DownloaderConfig:
+    """Configuration for the recording asset downloader."""
+
+    target_dir: Path = field(default_factory=lambda: Path("downloads"))
+    overwrite: bool = False
+    dry_run: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenshareConfig:
+    """Configuration for screenshare preprocessing."""
+
+    enabled: bool = False
+    output_dir: Path | None = None
+    preprocess_config: PreprocessConfig = field(default_factory=PreprocessConfig)
+
+
+@dataclass(frozen=True, slots=True)
+class Config:
+    """Unified application configuration."""
+
+    credentials: OAuthCredentials
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
+    downloader: DownloaderConfig = field(default_factory=DownloaderConfig)
+    screenshare: ScreenshareConfig = field(default_factory=ScreenshareConfig)
+    client_overrides: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,4 +190,8 @@ __all__ = [
     "ConfigurationError",
     "OAuthCredentials",
     "load_oauth_credentials",
+    "Config",
+    "LoggingConfig",
+    "DownloaderConfig",
+    "ScreenshareConfig",
 ]

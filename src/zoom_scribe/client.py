@@ -15,7 +15,7 @@ import requests
 
 from ._datetime import ensure_utc
 from ._redact import redact_identifier, redact_uuid
-from .config import ConfigurationError, load_oauth_credentials
+from .config import Config, ConfigurationError
 from .models import ModelValidationError, Recording, RecordingFile, RecordingPage
 
 _LOGGER = logging.getLogger(__name__)
@@ -94,26 +94,6 @@ class TokenRefreshError(RuntimeError):
     """Raised when an access token cannot be refreshed."""
 
 
-def load_env_credentials(dotenv_path: str | None = None) -> dict[str, str]:
-    """Return Zoom OAuth credentials sourced from the environment.
-
-    Args:
-        dotenv_path: Optional path to a ``.env`` file to load before reading environment
-            variables.
-
-    Returns:
-        Dictionary mapping OAuth credential keys (e.g., ``ZOOM_ACCOUNT_ID``) to their values.
-
-    Raises:
-        MissingCredentialsError: If any required credential is absent.
-    """
-    try:
-        credentials = load_oauth_credentials(dotenv_path=dotenv_path)
-    except ConfigurationError as exc:  # pragma: no cover - translated in tests
-        raise MissingCredentialsError(str(exc)) from exc
-    return dict(credentials.to_dict())
-
-
 def _double_urlencode(value: str) -> str:
     """Percent-encode ``value`` twice so it is safe for Zoom path parameters."""
     once = quote(value, safe="")
@@ -167,16 +147,15 @@ class ZoomAPIClient:
         self._lock = threading.RLock()
 
     @classmethod
-    def from_env(
-        cls,
-        *,
-        dotenv_path: str | None = None,
-        **overrides: Any,
-    ) -> ZoomAPIClient:
-        """Create a client using environment credentials with optional overrides."""
-        env_credentials = cast(dict[str, Any], load_env_credentials(dotenv_path))
-        initial_kwargs = {**env_credentials, **overrides}
-        return cls(**initial_kwargs)
+    def from_config(cls, config: Config) -> ZoomAPIClient:
+        """Create a client from a unified ``Config`` object."""
+        credentials = config.credentials
+        return cls(
+            account_id=credentials.account_id,
+            client_id=credentials.client_id,
+            client_secret=credentials.client_secret,
+            **config.client_overrides,
+        )
 
     def list_recordings(
         self,
@@ -734,5 +713,4 @@ __all__ = [
     "ZoomNotFoundError",
     "ZoomRateLimitError",
     "ZoomRetryableError",
-    "load_env_credentials",
 ]

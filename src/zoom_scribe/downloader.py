@@ -13,16 +13,12 @@ from pathlib import Path
 from typing import IO, Any, Protocol, runtime_checkable
 
 from ._redact import redact_identifier, redact_uuid
+from .client import ZoomAPIClient
+from .config import DownloaderConfig
 from .models import Recording, RecordingFile
 
 _SANITIZE_PATTERN = re.compile(r"[^A-Za-z0-9._@-]")
 _PART_SUFFIX = ".part"
-
-
-@runtime_checkable
-class _Readable(Protocol):
-    def read(self) -> bytes:
-        """Return the bytes content for a stream-like object."""
 
 
 class DownloadError(RuntimeError):
@@ -46,14 +42,16 @@ class RecordingDownloader:
 
     def __init__(
         self,
-        client: Any,
+        client: ZoomAPIClient,
         *,
+        config: DownloaderConfig,
         logger: logging.Logger | None = None,
         max_workers: int = 2,
         progress_stream: IO[str] | None = None,
     ) -> None:
         """Initialise the downloader with a client capable of fetching bytes."""
         self.client = client
+        self.config = config
         self.logger = logger or logging.getLogger(__name__)
         self.max_workers = max(1, int(max_workers))
         self._progress_stream = progress_stream or sys.stderr
@@ -63,15 +61,14 @@ class RecordingDownloader:
         self,
         recording: Recording,
         recording_file: RecordingFile,
-        target_dir: str | Path,
+        target_dir: Path,
     ) -> Path:
         """Return the destination path for a recording file within ``target_dir``."""
-        target = Path(target_dir)
         start = recording.start_time
         host_dir = _sanitize(recording.host_email)
         topic_dir = _sanitize(f"{recording.meeting_topic}-{recording.uuid}")
         dated_path = (
-            target
+            target_dir
             / host_dir
             / f"{start.year:04d}"
             / f"{start.month:02d}"
@@ -79,34 +76,29 @@ class RecordingDownloader:
             / topic_dir
         )
         timestamp = start.strftime("%Y-%m-%dT%H-%M-%S")
-        extension = recording_file.file_extension.lstrip(".")
+        extension = recording_file.file_extension.lstrip(".").lower()
         filename = f"{recording_file.file_type}-{timestamp}.{extension}"
         return dated_path / filename
 
     def download(
         self,
         recordings: Sequence[Recording],
-        target_dir: str | Path,
         *,
-        dry_run: bool = False,
-        overwrite: bool = False,
         post_download: PostDownloadHook | None = None,
     ) -> None:
         """Download the supplied recordings into ``target_dir`` respecting flags.
 
         Args:
             recordings: Collection of meeting recordings to persist.
-            target_dir: Root directory used for on-disk storage.
-            dry_run: When ``True`` no files are written, only progress is logged.
-            overwrite: When ``True`` existing files are replaced with freshly
-                downloaded data.
             post_download: Optional callback invoked after each recording file is
                 processed (including skips). Not executed during dry runs.
         """
-        if dry_run:
+        if self.config.dry_run:
             for recording in recordings:
-                for recording_file in recording.recording_files:
-                    destination = self.build_file_path(recording, recording_file, target_dir)
+                for recording_file in recording.files:
+                    destination = self.build_file_path(
+                        recording, recording_file, self.config.target_dir
+                    )
                     self._log_progress(
                         "dry_run",
                         destination,
@@ -118,14 +110,16 @@ class RecordingDownloader:
         futures: dict[Future[Path], tuple[Recording, RecordingFile, Path]] = {}
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             for recording in recordings:
-                for recording_file in recording.recording_files:
-                    destination = self.build_file_path(recording, recording_file, target_dir)
+                for recording_file in recording.files:
+                    destination = self.build_file_path(
+                        recording, recording_file, self.config.target_dir
+                    )
                     future = executor.submit(
                         self._download_single,
                         recording,
                         recording_file,
                         destination,
-                        overwrite,
+                        self.config.overwrite,
                         post_download,
                     )
                     futures[future] = (recording, recording_file, destination)
@@ -162,8 +156,8 @@ class RecordingDownloader:
 
         try:
             with temp_path.open("wb") as temp_file:
-                for chunk in self._download_contents(recording_file):
-                    temp_file.write(chunk)
+                contents = self._download_contents(recording_file)
+                temp_file.write(contents)
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
             temp_path.replace(destination)
@@ -199,36 +193,9 @@ class RecordingDownloader:
                 },
             )
 
-    def _download_contents(self, recording_file: RecordingFile) -> Iterable[bytes]:
-        """Yield the binary payload for ``recording_file`` in chunks."""
-        download_file = getattr(self.client, "download_file", None)
-        if callable(download_file):
-            data = download_file(
-                url=recording_file.download_url,
-                access_token=recording_file.download_access_token,
-            )
-        else:
-            data = self.client.download_recording_file(recording_file)
-        yield from self._iterate_bytes(data)
-
-    def _iterate_bytes(self, data: Any) -> Iterable[bytes]:
-        """Normalise download payloads into a byte iterator."""
-        if isinstance(data, (bytes, bytearray, memoryview)):
-            yield bytes(data)
-            return
-        if isinstance(data, _Readable):
-            chunk = data.read()
-            if not isinstance(chunk, (bytes, bytearray, memoryview)):
-                raise TypeError("Stream read must return bytes-like data")
-            yield bytes(chunk)
-            return
-        if isinstance(data, Iterable):
-            for chunk in data:
-                if not isinstance(chunk, (bytes, bytearray, memoryview)):
-                    raise TypeError("Download chunks must be bytes-like")
-                yield bytes(chunk)
-            return
-        raise TypeError("Expected bytes or iterable of bytes from client download")
+    def _download_contents(self, recording_file: RecordingFile) -> bytes:
+        """Return the binary payload for ``recording_file``."""
+        return self.client.download_recording_file(recording_file)
 
     def _log_progress(
         self,
