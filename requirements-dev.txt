@@ -4,6 +4,7 @@ black
 isort
 mypy
 pytest
+httpx
 pytest-cov
 ruff
 types-requests

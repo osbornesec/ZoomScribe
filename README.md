@@ -76,6 +76,44 @@ python -m zoom_scribe.main --dry-run --log-level debug
 python -m zoom_scribe.main --log-format json | jq
 ```
 
+## Web UI
+
+ZoomScribe now ships with a lightweight web frontend that reuses the existing client and downloader logic. It exposes a FastAPI adapter at `/api/*` and a React single-page app for browsing and triggering downloads.
+
+### Development workflow
+
+```bash
+# Start the FastAPI backend (reads the same ZOOM_* environment variables)
+uvicorn zoom_scribe.web_api:app --reload
+
+# In another terminal, run the Vite dev server (includes a proxy to the API)
+cd web
+pnpm install
+pnpm dev
+
+# Convenience wrapper
+make serve-all
+```
+
+Visit `http://localhost:5173` in your browser; API calls are proxied to `http://localhost:8000`. Only `http://localhost:5173` is allowed via CORS during development. In production, run a frontend build and let FastAPI serve the static bundle:
+
+```bash
+cd web
+pnpm install
+pnpm build
+uvicorn zoom_scribe.web_api:app
+```
+
+The built assets are emitted to `web/dist/` and mounted at `/`, so `GET /` responds with the web UI while `/api/*` continues to serve JSON. The browser never receives Zoom credentials, download URLs, or access tokens—only aggregate metadata. All download work still executes server-side through the existing downloader.
+
+### API surface
+
+- `GET /api/health` → `{"status": "ok"}` for readiness checks.
+- `GET /api/recordings` with optional query params `from`, `to`, `host_email`, `meeting_id` returns summaries (UUID, topic, host, start time, duration, asset count, total size).
+- `POST /api/download` body `{ "meeting_id_or_uuid": "<uuid>", "overwrite"?: bool, "target_dir"?: str }` triggers an immediate download using the standard CLI semantics and responds with `{ "ok": true, "files_expected": <int>, "note"?: str }`.
+
+Errors are normalised to `{ "message": "…", "code": "…" }`. If Zoom credentials are missing, the API returns HTTP 503 with `"Missing Zoom OAuth credentials"`, mirroring the CLI behaviour.
+
 ## Testing
 ```bash
 pytest
