@@ -1,6 +1,6 @@
 SHELL := /usr/bin/env bash
 
-.PHONY: lint
+.PHONY: lint web-dev web-build serve-api serve-all
 lint:
 	@set -euo pipefail; \
 	if [[ -n "${VIRTUAL_ENV:-}" ]]; then PYTHON="$$VIRTUAL_ENV/bin/python"; \
@@ -19,3 +19,27 @@ lint:
 		if command -v shellcheck >/dev/null 2>&1; then shellcheck $$sh_files; else echo "shellcheck not found, skipping"; fi; \
 		if command -v shfmt >/dev/null 2>&1; then shfmt -d -i 4 -ci -sr $$sh_files; else echo "shfmt not found, skipping"; fi; \
 	else echo "No shell scripts to lint"; fi
+
+web-dev:
+	@set -euo pipefail; \
+	cd web; \
+	if [[ ! -d node_modules ]]; then pnpm install --frozen-lockfile; fi; \
+	pnpm dev
+
+web-build:
+	@set -euo pipefail; \
+	cd web; \
+	pnpm install --frozen-lockfile; \
+	pnpm build
+
+serve-api:
+	@uvicorn zoom_scribe.web_api:app --reload
+
+serve-all:
+	@set -euo pipefail; \
+	uvicorn zoom_scribe.web_api:app --reload & \
+	backend_pid=$$!; \
+	trap "kill $$backend_pid" INT TERM EXIT; \
+	cd web; \
+	pnpm install --frozen-lockfile; \
+	pnpm dev

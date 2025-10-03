@@ -4,3 +4,5 @@ python-dotenv
 opencv-python-headless==4.9.0.80
 numpy==1.26.4
 scikit-image==0.22.0
+fastapi
+uvicorn[standard]
